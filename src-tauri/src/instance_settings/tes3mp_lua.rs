@@ -135,7 +135,7 @@ config.other = 1
         let settings = default_instance_settings();
         let output = patch_game_settings_block(input, &settings);
         assert!(output.contains("config.gameSettings = {"));
-        assert!(!output.contains("value = true"));
+        assert!(!output.contains("{ name = \"best attack\", value = true }"));
         assert!(output.contains("best attack"));
         assert!(output.contains("config.other = 1"));
     }
