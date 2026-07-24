@@ -33,6 +33,10 @@ pub use paths::{
     manifest_path, nerevar_dir, package_abs_path, resolve_package_data_dir,
 };
 pub use prune::prune_local_against_manifest;
+// Test-only: expose the manifest's file-checksum helper (itself `#[cfg(test)]`) to the
+// crate-level sync roundtrip test. Compiled only for tests; no production visibility change.
+#[cfg(test)]
+pub use checksum::file_checksum;
 pub use remove::delete_package;
 pub use resolver::{resolve_load_order, resolve_synced_load_order};
 pub use types::*;

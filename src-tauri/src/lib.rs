@@ -18,6 +18,9 @@ mod sync_client;
 mod sync_host;
 mod sync_paths;
 
+#[cfg(test)]
+mod sync_roundtrip_test;
+
 use crate::data::GithubReleaseResponse;
 use crate::data::NerevarConfig;
 use crate::data::NewInstanceConfig;
