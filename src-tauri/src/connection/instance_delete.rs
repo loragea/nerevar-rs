@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 
 use crate::data::{InstanceConfig, NerevarConfig};
 use crate::instance_data::{find_instance_by_id, resolve_package_data_dir};
@@ -132,7 +132,7 @@ pub fn delete_instance(
     }
 
     let _ = coordinator.cancel(&instance_id);
-    let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.clone()));
+    let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app));
     clear_hosting_if_needed(sync_host.inner(), manifest_cache.inner(), &instance_id, &*sink)?;
 
     if delete_data_directory {
@@ -152,6 +152,6 @@ pub fn delete_instance(
         guard.nerevar_config.clone()
     };
 
-    let _ = app.emit("on_config_change", config.clone());
+    emit_event(&*sink, "on_config_change", &config);
     Ok(config)
 }

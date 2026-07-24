@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 
 use crate::config::nerevar_config::{
     build_synced_instance_config, persist_synced_instance_to_config, update_synced_instance,
@@ -21,7 +21,7 @@ use crate::process_manager::{
     launch_tes3mp_client, launch_tes3mp_server, stop_tes3mp_process, GlobalProcessStatus,
     ProcessManager, ProcessRole,
 };
-use crate::reporter::{EventSink, TauriEventSink};
+use crate::reporter::{emit_event, EventSink, TauriEventSink};
 use crate::sync_client::{
     fetch_manifest_summary, ping_nerevar_server, run_instance_sync, sync_if_needed,
     touch_last_synced, write_synced_client_connection, RemoteManifestSummary, SyncCoordinator,
@@ -53,7 +53,6 @@ pub async fn fetch_remote_manifest_summary(
 #[tauri::command]
 pub async fn add_synced_connection(
     state: State<'_, Mutex<AppState>>,
-    _app: AppHandle,
     new_connection: NewConnectionConfig,
 ) -> Result<String, String> {
     let instance_root = Path::new(&new_connection.instance_root_path);
@@ -107,14 +106,10 @@ pub async fn add_synced_connection(
     let mut instance = build_synced_instance_config(&new_connection);
     instance.tes3mp_server_port = Some(summary.tes3mp_server_port);
     let instance_id = instance.id.clone();
-    let (config, app_handle) = persist_synced_instance_to_config(&state, instance)?;
+    let (config, sink) = persist_synced_instance_to_config(&state, instance)?;
 
-    app_handle
-        .emit("on_config_added_connection", config.clone())
-        .map_err(|e| e.to_string())?;
-    app_handle
-        .emit("on_config_change", config)
-        .map_err(|e| e.to_string())?;
+    emit_event(&*sink, "on_config_added_connection", &config);
+    emit_event(&*sink, "on_config_change", &config);
 
     Ok(instance_id)
 }
@@ -133,9 +128,9 @@ pub async fn sync_instance_from_remote(
             .clone()
     };
 
-    let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.clone()));
+    let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app));
     let validation =
-        run_instance_sync(sink, coordinator.inner().clone(), &instance).await?;
+        run_instance_sync(sink.clone(), coordinator.inner().clone(), &instance).await?;
 
     if validation.valid {
         let data_dir = resolve_package_data_dir(&instance);
@@ -143,7 +138,7 @@ pub async fn sync_instance_from_remote(
         let mut updated = instance;
         touch_last_synced(&mut updated, &manifest);
         let config = update_synced_instance(&state, updated)?;
-        let _ = app.emit("on_config_change", config);
+        emit_event(&*sink, "on_config_change", &config);
     }
 
     Ok(validation)
@@ -172,7 +167,7 @@ pub async fn launch_instance_client(
             .clone()
     };
 
-    let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.clone()));
+    let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app));
 
     if instance.remote_host.is_some() {
         let validation = sync_if_needed(
@@ -200,7 +195,7 @@ pub async fn launch_instance_client(
             || updated.last_synced_at != instance.last_synced_at
         {
             let config = update_synced_instance(&state, updated)?;
-            let _ = app.emit("on_config_change", config);
+            emit_event(&*sink, "on_config_change", &config);
         }
     } else {
         let tes3mp_dir = instance_tes3mp_dir(Path::new(&instance.path));

@@ -1,7 +1,7 @@
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 
 use crate::config::nerevar_config::{update_owned_instance, update_synced_instance};
 use crate::data::{InstanceConnectionSettings, InstanceEditPayload};
@@ -11,6 +11,7 @@ use crate::instance_setup::{
     update_server_connection_settings, write_owned_client_connection,
     write_tes3mp_client_connection,
 };
+use crate::reporter::{emit_event, EventSink, TauriEventSink};
 use crate::AppState;
 
 #[tauri::command]
@@ -65,6 +66,8 @@ pub fn update_instance(
     state: State<'_, Mutex<AppState>>,
     edit: InstanceEditPayload,
 ) -> Result<InstanceConnectionSettings, String> {
+    let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app));
+
     let mut instance = {
         let guard = state.lock().map_err(|_| "App state lock poisoned".to_string())?;
         find_instance_by_id(&guard.nerevar_config, &edit.id)
@@ -98,7 +101,7 @@ pub fn update_instance(
             instance.tes3mp_server_port = Some(game_port);
         }
         let config = update_synced_instance(&state, instance)?;
-        let _ = app.emit("on_config_change", config);
+        emit_event(&*sink, "on_config_change", &config);
     } else {
         update_server_connection_settings(
             &tes3mp_dir,
@@ -109,7 +112,7 @@ pub fn update_instance(
         write_owned_client_connection(&tes3mp_dir)?;
         instance.tes3mp_server_port = Some(edit.port);
         let config = update_owned_instance(&state, instance)?;
-        let _ = app.emit("on_config_change", config);
+        emit_event(&*sink, "on_config_change", &config);
     }
 
     get_instance_connection_settings(state, edit.id)

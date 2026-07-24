@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 // use std::time::Duration;
 
 use crate::data::{InstanceConfig, NerevarConfig, NewConnectionConfig, NewInstanceConfig};
@@ -7,9 +7,10 @@ use crate::port_conflict;
 use crate::github_getters;
 use crate::instance_data::ensure_instance_data_layout;
 use crate::instance_setup::{apply_server_defaults, create_instance_data_dir, instance_tes3mp_dir};
+use crate::reporter::{emit_event, EventSink};
 use crate::AppState;
 // use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use tauri::{AppHandle, Emitter, State};
+use tauri::State;
 use tauri_plugin_log::log::info;
 use uuid::Uuid;
 
@@ -61,7 +62,7 @@ pub fn load_or_create_nerevar_config(
 }
 
 pub async fn complete_onboarding(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let (app_handle, config, start_sync_server) = {
+    let (sink, app_handle, config, start_sync_server) = {
         let mut state = state.lock().unwrap();
         let was_complete = state.nerevar_config.onboarding_complete;
         state.nerevar_config.onboarding_complete = true;
@@ -78,6 +79,12 @@ pub async fn complete_onboarding(state: State<'_, Mutex<AppState>>) -> Result<()
 
         (
             state
+                .event_sink
+                .clone()
+                .ok_or_else(|| "Event sink not initialized".to_string())?,
+            // Only needed for the port_conflict probe below (step 6b still
+            // takes `&AppHandle`); everything else uses `sink`.
+            state
                 .app_handle
                 .clone()
                 .ok_or_else(|| "App handle not initialized".to_string())?,
@@ -86,9 +93,7 @@ pub async fn complete_onboarding(state: State<'_, Mutex<AppState>>) -> Result<()
         )
     };
 
-    app_handle
-        .emit("on_config_change", config.clone())
-        .map_err(|e| e.to_string())?;
+    emit_event(&*sink, "on_config_change", &config);
 
     if start_sync_server {
         let app = app_handle.clone();
@@ -185,7 +190,7 @@ pub async fn set_sync_port(state: State<'_, Mutex<AppState>>, port: i32) -> Resu
         return Err(format!("Sync port must be between 1 and 65535, got {port}"));
     }
 
-    let (config_path, config_snapshot, tx, app_handle, restart_server) = {
+    let (config_path, config_snapshot, tx, sink, restart_server) = {
         let mut guard = state
             .lock()
             .map_err(|_| "App state lock poisoned".to_string())?;
@@ -194,7 +199,7 @@ pub async fn set_sync_port(state: State<'_, Mutex<AppState>>, port: i32) -> Resu
             guard.nerevar_config_path.clone(),
             guard.nerevar_config.clone(),
             guard.server_port_tx.clone(),
-            guard.app_handle.clone(),
+            guard.event_sink.clone(),
             guard.nerevar_config.onboarding_complete,
         )
     };
@@ -211,8 +216,8 @@ pub async fn set_sync_port(state: State<'_, Mutex<AppState>>, port: i32) -> Resu
         }
     }
 
-    if let Some(app) = app_handle {
-        let _ = app.emit("on_config_change", config_snapshot);
+    if let Some(sink) = sink {
+        emit_event(&*sink, "on_config_change", &config_snapshot);
     }
 
     Ok(())
@@ -257,7 +262,7 @@ pub fn build_synced_instance_config(new_connection: &NewConnectionConfig) -> Ins
 fn persist_owned_instance_to_config(
     state: &State<'_, Mutex<AppState>>,
     instance: InstanceConfig,
-) -> Result<(NerevarConfig, AppHandle), String> {
+) -> Result<(NerevarConfig, Arc<dyn EventSink>), String> {
     let mut guard = state
         .lock()
         .map_err(|_| "App state lock poisoned".to_string())?;
@@ -274,18 +279,18 @@ fn persist_owned_instance_to_config(
     .map_err(|e| e.to_string())?;
 
     let config = guard.nerevar_config.clone();
-    let app_handle = guard
-        .app_handle
+    let sink = guard
+        .event_sink
         .clone()
-        .ok_or_else(|| "App handle not initialized".to_string())?;
+        .ok_or_else(|| "Event sink not initialized".to_string())?;
 
-    Ok((config, app_handle))
+    Ok((config, sink))
 }
 
 pub fn persist_synced_instance_to_config(
     state: &State<'_, Mutex<AppState>>,
     instance: InstanceConfig,
-) -> Result<(NerevarConfig, AppHandle), String> {
+) -> Result<(NerevarConfig, Arc<dyn EventSink>), String> {
     let mut guard = state
         .lock()
         .map_err(|_| "App state lock poisoned".to_string())?;
@@ -302,12 +307,12 @@ pub fn persist_synced_instance_to_config(
     .map_err(|e| e.to_string())?;
 
     let config = guard.nerevar_config.clone();
-    let app_handle = guard
-        .app_handle
+    let sink = guard
+        .event_sink
         .clone()
-        .ok_or_else(|| "App handle not initialized".to_string())?;
+        .ok_or_else(|| "Event sink not initialized".to_string())?;
 
-    Ok((config, app_handle))
+    Ok((config, sink))
 }
 
 pub fn update_synced_instance(
@@ -418,15 +423,10 @@ pub async fn add_instance(
     }
 
     let instance = build_instance_config(&new_instance);
-    let (config, app_handle) = persist_owned_instance_to_config(&state, instance)?;
+    let (config, sink) = persist_owned_instance_to_config(&state, instance)?;
 
-    app_handle
-        .emit("on_config_added_instance", config.clone())
-        .map_err(|e| e.to_string())?;
-
-    app_handle
-        .emit("on_config_change", config)
-        .map_err(|e| e.to_string())?;
+    emit_event(&*sink, "on_config_added_instance", &config);
+    emit_event(&*sink, "on_config_change", &config);
 
     info!(
         "Instance '{}' created at {}",

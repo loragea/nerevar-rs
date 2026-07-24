@@ -27,6 +27,7 @@ use crate::data::NerevarConfig;
 use crate::data::NewInstanceConfig;
 use crate::port_conflict::PortConflict;
 use crate::process_manager::ProcessManager;
+use crate::reporter::{EventSink, TauriEventSink};
 use crate::sync_client::SyncCoordinator;
 use crate::sync_host::{new_shared_hosting_manifest_cache, new_shared_sync_host};
 use std::sync::{Arc, Mutex};
@@ -36,7 +37,11 @@ use tokio::sync::watch;
 
 #[derive(Default)]
 struct AppState {
+    // Retained alongside `event_sink` only for the port_conflict startup/
+    // onboarding probe (step 6b of the EventSink migration still takes
+    // `&AppHandle`); every other backend emit goes through `event_sink`.
     app_handle: Option<tauri::AppHandle>,
+    event_sink: Option<Arc<dyn EventSink>>,
     nerevar_config_path: String,
     nerevar_config: NerevarConfig,
     server_port_tx: Option<watch::Sender<i32>>,
@@ -177,8 +182,11 @@ pub fn run() {
                 .unwrap()
                 .nerevar_config = config;
 
-            // Set the app Handle
+            // Set the app handle (port_conflict probe, step 6b) and the
+            // event sink (everything else) from the same handle.
             app.state::<Mutex<AppState>>().lock().unwrap().app_handle = Some(app.handle().clone());
+            app.state::<Mutex<AppState>>().lock().unwrap().event_sink =
+                Some(Arc::new(TauriEventSink::new(app.handle().clone())));
 
             // DISABLED CONFIG WATCHER FOR NOW AS EVEN INTERNAL CHANGES TRIGGER IT AND WILL
             // CAUSE UNECESSARY RE-RENDERS IN REACT
