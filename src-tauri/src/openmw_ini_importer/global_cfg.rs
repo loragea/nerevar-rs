@@ -38,10 +38,31 @@ enum OpenMwRestoreStrategy {
     RemoveActive,
 }
 
-pub fn resolve_openmw_global_paths() -> Result<OpenMwGlobalPaths, String> {
+/// Resolve the directory where OpenMW/TES3MP reads its per-user configuration,
+/// matching OpenMW's platform-specific defaults.
+#[cfg(windows)]
+fn resolve_openmw_global_dir() -> Result<PathBuf, String> {
     let documents_dir =
         dirs::document_dir().ok_or_else(|| "Failed to resolve documents directory".to_string())?;
-    let dir = documents_dir.join("My Games/OpenMW");
+    Ok(documents_dir.join("My Games/OpenMW"))
+}
+
+#[cfg(target_os = "macos")]
+fn resolve_openmw_global_dir() -> Result<PathBuf, String> {
+    let home_dir =
+        dirs::home_dir().ok_or_else(|| "Failed to resolve home directory".to_string())?;
+    Ok(home_dir.join("Library/Preferences/openmw"))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn resolve_openmw_global_dir() -> Result<PathBuf, String> {
+    let config_dir =
+        dirs::config_dir().ok_or_else(|| "Failed to resolve config directory".to_string())?;
+    Ok(config_dir.join("openmw"))
+}
+
+pub fn resolve_openmw_global_paths() -> Result<OpenMwGlobalPaths, String> {
+    let dir = resolve_openmw_global_dir()?;
     Ok(OpenMwGlobalPaths {
         active: dir.join(OPENMW_CFG),
         backup: dir.join(OPENMW_BACKUP_CFG),
@@ -403,11 +424,20 @@ fn merge_launch_overlay(mut base: MultiStrMap, launch: MultiStrMap) -> MultiStrM
     base
 }
 
+#[cfg(windows)]
 fn normalize_data_path(path: &str) -> String {
     path.trim()
         .trim_matches('"')
         .replace('/', "\\")
         .to_lowercase()
+}
+
+#[cfg(not(windows))]
+fn normalize_data_path(path: &str) -> String {
+    // Unix filesystems are case-sensitive and use '/' separators, so preserve
+    // case and separators; only strip surrounding whitespace and quotes. A
+    // false non-match merely yields a harmless duplicate `data=` line.
+    path.trim().trim_matches('"').to_string()
 }
 
 fn data_paths_equal(left: &str, right: &str) -> bool {
@@ -439,11 +469,32 @@ mod tests {
         assert!(composed.contains("content=Morrowind.esm"));
     }
 
+    #[cfg(windows)]
     #[test]
     fn data_paths_equal_ignores_quotes_and_case() {
         assert!(data_paths_equal(
             r#""C:\Morrowind\Data Files""#,
             "c:/morrowind/data files"
+        ));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn data_paths_equal_ignores_quotes_and_whitespace() {
+        // Quotes and surrounding whitespace are still ignored.
+        assert!(data_paths_equal(
+            r#"  "/home/user/morrowind/Data Files"  "#,
+            "/home/user/morrowind/Data Files"
+        ));
+        // Case is significant on case-sensitive unix filesystems.
+        assert!(!data_paths_equal(
+            "/home/user/Morrowind/Data Files",
+            "/home/user/morrowind/data files"
+        ));
+        // Identical unix paths compare equal.
+        assert!(data_paths_equal(
+            "/opt/games/morrowind/Data Files",
+            "/opt/games/morrowind/Data Files"
         ));
     }
 
