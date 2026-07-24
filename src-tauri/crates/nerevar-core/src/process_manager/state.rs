@@ -169,6 +169,58 @@ impl ProcessManager {
         Ok(true)
     }
 
+    /// Synchronous variant of `stop`: kills and reaps the process on the
+    /// calling thread instead of a background thread, so the caller knows
+    /// for certain the process (and any port it held) is gone before it
+    /// proceeds. `stop` must stay non-blocking for GUI commands (never
+    /// stall the Tauri command thread); this exists for the headless
+    /// `nerevar-host` daemon's shutdown path, where blocking briefly at
+    /// exit — after SIGTERM/SIGINT, before the process itself exits — is
+    /// exactly the point (systemd expects the port released before the
+    /// unit is considered stopped).
+    pub fn stop_blocking(
+        &self,
+        sink: Option<Arc<dyn EventSink>>,
+        instance_id: &str,
+        role: ProcessRole,
+    ) -> Result<bool, String> {
+        let key = Self::key(instance_id, role);
+        let child_arc = {
+            let mut guard = self
+                .processes
+                .lock()
+                .map_err(|_| "Process manager lock poisoned".to_string())?;
+            guard.remove(&key).map(|managed| managed.child)
+        };
+
+        let Some(child_arc) = child_arc else {
+            return Ok(false);
+        };
+
+        if role == ProcessRole::Client {
+            self.restore_global_openmw_session_if_any();
+        }
+
+        let Some(exit_code) = kill_and_reap(&child_arc) else {
+            // Already gone (raced with natural exit); the exit watcher
+            // emitted its own process-status, nothing more to report.
+            return Ok(true);
+        };
+        if let Some(sink) = sink {
+            emit_event(
+                &*sink,
+                "process-status",
+                &ProcessStatusEvent {
+                    instance_id: instance_id.to_string(),
+                    role: role.as_str().to_string(),
+                    running: false,
+                    exit_code,
+                },
+            );
+        }
+        Ok(true)
+    }
+
     pub fn remove(&self, instance_id: &str, role: ProcessRole) {
         if let Ok(mut guard) = self.processes.lock() {
             guard.remove(&Self::key(instance_id, role));
@@ -209,6 +261,19 @@ impl ProcessManager {
     }
 }
 
+/// Kill and reap the child held in `child_arc`, if any. `None` means the
+/// slot was already empty (a race with natural exit — the exit watcher
+/// already emitted its own status); `Some(code)` means this call did the
+/// killing, with `code` its exit code if captured. Shared by the
+/// non-blocking (`stop_child_in_background`) and blocking (`stop_blocking`)
+/// shutdown paths so both kill the same way.
+fn kill_and_reap(child_arc: &Arc<Mutex<Option<Child>>>) -> Option<Option<i32>> {
+    let mut slot = child_arc.lock().ok()?;
+    let mut child = slot.take()?;
+    let _ = child.kill();
+    Some(child.wait().ok().and_then(|s| s.code()))
+}
+
 /// Kill and reap a child on a background thread so Tauri commands never block on `wait()`.
 /// Only this path (or the watch thread after natural exit) may call `wait()`.
 fn stop_child_in_background(
@@ -216,16 +281,8 @@ fn stop_child_in_background(
     status_emit: Option<(Arc<dyn EventSink>, String, String)>,
 ) {
     thread::spawn(move || {
-        let exit_code = {
-            let mut slot = match child_arc.lock() {
-                Ok(g) => g,
-                Err(_) => return,
-            };
-            let Some(mut child) = slot.take() else {
-                return;
-            };
-            let _ = child.kill();
-            child.wait().ok().and_then(|s| s.code())
+        let Some(exit_code) = kill_and_reap(&child_arc) else {
+            return;
         };
 
         if let Some((sink, instance_id, role)) = status_emit {

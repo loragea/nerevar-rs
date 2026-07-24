@@ -29,6 +29,17 @@ pub fn nerevar_config_file_path(identifier: &str) -> PathBuf {
     app_data_dir.join(CONFIG_FILE_NAME)
 }
 
+/// Non-panicking counterpart to `nerevar_config_file_path`: `None` when
+/// `dirs::data_dir()` doesn't resolve (e.g. a service account with no home),
+/// instead of panicking. The GUI treats a resolvable user data dir as a
+/// startup invariant and keeps using the panicking form; the headless
+/// `nerevar-host` daemon's config-resolution fallback (see
+/// notes/nerevar-host-design.md) needs to handle the "doesn't resolve" case
+/// gracefully, so it uses this instead.
+pub fn nerevar_config_file_path_opt(identifier: &str) -> Option<PathBuf> {
+    Some(dirs::data_dir()?.join(identifier).join(CONFIG_FILE_NAME))
+}
+
 pub fn load_or_create_nerevar_config_at(config_path: &Path) -> Result<NerevarConfig, String> {
     if !config_path.exists() {
         info!("Creating default config file at {}", config_path.display());
@@ -51,6 +62,21 @@ pub fn load_or_create_nerevar_config_at(config_path: &Path) -> Result<NerevarCon
         return Ok(default_config);
     }
 
+    let contents = std::fs::read_to_string(config_path).map_err(|e| e.to_string())?;
+    info!("Loading config file from {}", config_path.display());
+    serde_json::from_str(&contents).map_err(|e| e.to_string())
+}
+
+/// Read-only counterpart to `load_or_create_nerevar_config_at`: parses an
+/// existing config file and errors if it is missing, instead of writing a
+/// default one. For callers that must never create config as a side effect
+/// of reading it (the headless `nerevar-host` daemon — see
+/// notes/nerevar-host-design.md's Config section; the GUI's onboarding flow
+/// is the only place auto-creation is desired).
+pub fn load_nerevar_config_at(config_path: &Path) -> Result<NerevarConfig, String> {
+    if !config_path.exists() {
+        return Err(format!("Config file not found at {}", config_path.display()));
+    }
     let contents = std::fs::read_to_string(config_path).map_err(|e| e.to_string())?;
     info!("Loading config file from {}", config_path.display());
     serde_json::from_str(&contents).map_err(|e| e.to_string())

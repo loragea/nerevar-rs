@@ -292,6 +292,14 @@ pub fn launch_tes3mp_server(
     Ok(())
 }
 
+/// Locate the TES3MP dedicated server executable under `tes3mp_dir`, using
+/// the same name/preference rules as `launch_tes3mp_server`. Read-only
+/// lookup for callers that need existence without launching (the headless
+/// `nerevar-host` daemon's `--check`).
+pub fn find_tes3mp_server_exe(tes3mp_dir: &Path) -> Option<PathBuf> {
+    find_executable(tes3mp_dir, SERVER_EXE_NAMES, 5)
+}
+
 pub fn stop_tes3mp_process(
     sink: Arc<dyn EventSink>,
     manager: &ProcessManager,
