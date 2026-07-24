@@ -2784,6 +2784,7 @@ dependencies = [
  "encoding_rs",
  "flate2",
  "log",
+ "nerevar-core",
  "netstat2",
  "notify",
  "opener",
@@ -2806,6 +2807,10 @@ dependencies = [
  "uuid",
  "zip",
 ]
+
+[[package]]
+name = "nerevar-core"
+version = "0.1.0"
 
 [[package]]
 name = "netlink-packet-core"
