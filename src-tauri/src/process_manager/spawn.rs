@@ -5,14 +5,13 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter};
-
 use crate::instance_data::{
     launch_cfg_path, launch_settings_overlay_path, resolve_instance_openmw_config,
     write_instance_launch_cfg,
 };
 use crate::instance_setup::{instance_tes3mp_dir, write_required_data_files_for_resolved};
 use crate::openmw_ini_importer::begin_global_openmw_launch;
+use crate::reporter::{emit_event, EventSink};
 use crate::sync_client::types::{ProcessOutputEvent, ProcessStatusEvent, ProcessStream};
 
 use super::state::{spawn_exit_watcher, ProcessManager};
@@ -91,7 +90,7 @@ pub fn find_executable(root: &Path, names: &[&str], max_depth: u32) -> Option<Pa
 }
 
 fn pipe_process_output(
-    app: AppHandle,
+    sink: Arc<dyn EventSink>,
     instance_id: String,
     role: ProcessRole,
     stream: ProcessStream,
@@ -99,9 +98,10 @@ fn pipe_process_output(
 ) {
     thread::spawn(move || {
         for line in reader.lines().map_while(Result::ok) {
-            let _ = app.emit(
+            emit_event(
+                &*sink,
                 "process-output",
-                ProcessOutputEvent {
+                &ProcessOutputEvent {
                     instance_id: instance_id.clone(),
                     role: role.as_str().to_string(),
                     stream: stream.clone(),
@@ -122,7 +122,7 @@ fn pipe_process_output(
 }
 
 pub fn launch_tes3mp_client(
-    app: AppHandle,
+    sink: Arc<dyn EventSink>,
     manager: Arc<ProcessManager>,
     instance_id: &str,
     instance_root: &Path,
@@ -172,7 +172,7 @@ pub fn launch_tes3mp_client(
 
     if let Some(out) = stdout {
         pipe_process_output(
-            app.clone(),
+            sink.clone(),
             instance_id.to_string(),
             ProcessRole::Client,
             ProcessStream::Stdout,
@@ -181,7 +181,7 @@ pub fn launch_tes3mp_client(
     }
     if let Some(err) = stderr {
         pipe_process_output(
-            app.clone(),
+            sink.clone(),
             instance_id.to_string(),
             ProcessRole::Client,
             ProcessStream::Stderr,
@@ -198,9 +198,10 @@ pub fn launch_tes3mp_client(
         ));
     }
 
-    let _ = app.emit(
+    emit_event(
+        &*sink,
         "process-status",
-        ProcessStatusEvent {
+        &ProcessStatusEvent {
             instance_id: instance_id.to_string(),
             role: ProcessRole::Client.as_str().to_string(),
             running: true,
@@ -210,7 +211,7 @@ pub fn launch_tes3mp_client(
 
     let child_handle = manager.insert(instance_id, ProcessRole::Client, child)?;
     spawn_exit_watcher(
-        app.clone(),
+        sink.clone(),
         manager.clone(),
         instance_id.to_string(),
         ProcessRole::Client,
@@ -220,7 +221,7 @@ pub fn launch_tes3mp_client(
 }
 
 pub fn launch_tes3mp_server(
-    app: AppHandle,
+    sink: Arc<dyn EventSink>,
     manager: Arc<ProcessManager>,
     instance_id: &str,
     instance_root: &Path,
@@ -252,7 +253,7 @@ pub fn launch_tes3mp_server(
 
     if let Some(out) = stdout {
         pipe_process_output(
-            app.clone(),
+            sink.clone(),
             instance_id.to_string(),
             ProcessRole::Server,
             ProcessStream::Stdout,
@@ -261,7 +262,7 @@ pub fn launch_tes3mp_server(
     }
     if let Some(err) = stderr {
         pipe_process_output(
-            app.clone(),
+            sink.clone(),
             instance_id.to_string(),
             ProcessRole::Server,
             ProcessStream::Stderr,
@@ -269,9 +270,10 @@ pub fn launch_tes3mp_server(
         );
     }
 
-    let _ = app.emit(
+    emit_event(
+        &*sink,
         "process-status",
-        ProcessStatusEvent {
+        &ProcessStatusEvent {
             instance_id: instance_id.to_string(),
             role: ProcessRole::Server.as_str().to_string(),
             running: true,
@@ -281,7 +283,7 @@ pub fn launch_tes3mp_server(
 
     let child_handle = manager.insert(instance_id, ProcessRole::Server, child)?;
     spawn_exit_watcher(
-        app.clone(),
+        sink.clone(),
         manager.clone(),
         instance_id.to_string(),
         ProcessRole::Server,
@@ -291,12 +293,12 @@ pub fn launch_tes3mp_server(
 }
 
 pub fn stop_tes3mp_process(
-    app: AppHandle,
+    sink: Arc<dyn EventSink>,
     manager: &ProcessManager,
     instance_id: &str,
     role: ProcessRole,
 ) -> Result<bool, String> {
-    manager.stop(Some(app), instance_id, role)
+    manager.stop(Some(sink), instance_id, role)
 }
 
 #[cfg(test)]

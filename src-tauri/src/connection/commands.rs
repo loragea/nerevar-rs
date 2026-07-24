@@ -172,10 +172,11 @@ pub async fn launch_instance_client(
             .clone()
     };
 
+    let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.clone()));
+
     if instance.remote_host.is_some() {
-        let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.clone()));
         let validation = sync_if_needed(
-            sink,
+            sink.clone(),
             coordinator.inner().clone(),
             &instance,
             false,
@@ -212,7 +213,7 @@ pub async fn launch_instance_client(
 
     let data_dir = resolve_package_data_dir(&instance);
     launch_tes3mp_client(
-        app,
+        sink,
         process_manager.inner().clone(),
         &instance_id,
         Path::new(&instance.path),
@@ -238,9 +239,10 @@ pub fn launch_instance_server(
         .inner()
         .ensure_can_launch(&instance_id, ProcessRole::Server)?;
 
+    let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app));
     let data_dir = resolve_package_data_dir(&instance);
     launch_tes3mp_server(
-        app,
+        sink,
         process_manager.inner().clone(),
         &instance_id,
         Path::new(&instance.path),
@@ -256,7 +258,8 @@ pub fn stop_instance_process(
     role: String,
 ) -> Result<bool, String> {
     let role = ProcessRole::from_str(&role).ok_or_else(|| format!("Invalid process role: {role}"))?;
-    stop_tes3mp_process(app, process_manager.inner(), &instance_id, role)
+    let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app));
+    stop_tes3mp_process(sink, process_manager.inner(), &instance_id, role)
 }
 
 #[tauri::command]

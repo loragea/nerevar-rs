@@ -4,9 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter};
-
 use crate::openmw_ini_importer::GlobalOpenMwLaunchSession;
+use crate::reporter::{emit_event, EventSink};
 use crate::sync_client::types::ProcessStatusEvent;
 
 use super::types::ProcessRole;
@@ -141,7 +140,7 @@ impl ProcessManager {
     /// Signal the process to exit without blocking the caller.
     pub fn stop(
         &self,
-        app: Option<AppHandle>,
+        sink: Option<Arc<dyn EventSink>>,
         instance_id: &str,
         role: ProcessRole,
     ) -> Result<bool, String> {
@@ -165,7 +164,7 @@ impl ProcessManager {
         }
         stop_child_in_background(
             child_arc,
-            app.map(|handle| (handle, instance_id, role_str)),
+            sink.map(|sink| (sink, instance_id, role_str)),
         );
         Ok(true)
     }
@@ -214,7 +213,7 @@ impl ProcessManager {
 /// Only this path (or the watch thread after natural exit) may call `wait()`.
 fn stop_child_in_background(
     child_arc: Arc<Mutex<Option<Child>>>,
-    status_emit: Option<(AppHandle, String, String)>,
+    status_emit: Option<(Arc<dyn EventSink>, String, String)>,
 ) {
     thread::spawn(move || {
         let exit_code = {
@@ -229,10 +228,11 @@ fn stop_child_in_background(
             child.wait().ok().and_then(|s| s.code())
         };
 
-        if let Some((app, instance_id, role)) = status_emit {
-            let _ = app.emit(
+        if let Some((sink, instance_id, role)) = status_emit {
+            emit_event(
+                &*sink,
                 "process-status",
-                ProcessStatusEvent {
+                &ProcessStatusEvent {
                     instance_id,
                     role,
                     running: false,
@@ -245,7 +245,7 @@ fn stop_child_in_background(
 
 /// Poll for process exit without holding the child lock across `wait()`.
 pub fn spawn_exit_watcher(
-    app: AppHandle,
+    sink: Arc<dyn EventSink>,
     manager: Arc<ProcessManager>,
     instance_id: String,
     role: ProcessRole,
@@ -286,9 +286,10 @@ pub fn spawn_exit_watcher(
         if role == ProcessRole::Client {
             manager.restore_global_openmw_session_if_any();
         }
-        let _ = app.emit(
+        emit_event(
+            &*sink,
             "process-status",
-            ProcessStatusEvent {
+            &ProcessStatusEvent {
                 instance_id,
                 role: role.as_str().to_string(),
                 running: false,
