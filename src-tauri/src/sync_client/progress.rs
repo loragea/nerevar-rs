@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Emitter};
+use crate::reporter::{emit_event, EventSink};
 
 use super::types::{SyncPhase, SyncProgressEvent};
 
@@ -51,7 +51,7 @@ fn percent_of_range(done: u64, total: u64, range: u8) -> u8 {
 
 #[allow(clippy::too_many_arguments)]
 pub fn emit_sync_progress(
-    app: &AppHandle,
+    sink: &dyn EventSink,
     instance_id: &str,
     phase: SyncPhase,
     message: impl Into<String>,
@@ -62,9 +62,10 @@ pub fn emit_sync_progress(
     current_file: Option<String>,
 ) {
     let overall_percent = overall_sync_percent(phase.clone(), bytes_done, bytes_total);
-    let _ = app.emit(
+    emit_event(
+        sink,
         "sync-progress",
-        SyncProgressEvent {
+        &SyncProgressEvent {
             instance_id: instance_id.to_string(),
             phase,
             message: message.into(),

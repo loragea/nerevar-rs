@@ -13,20 +13,33 @@
 //! `instance_data::*` — is crate-private, so it is only reachable from a module
 //! compiled as part of the crate.
 //!
-//! NOT covered: the parallel download engine (`sync_client/download.rs`). It requires a
-//! Tauri `AppHandle` to emit progress events, so it cannot run here. Extend this test
-//! through `download.rs` once the progress-reporter abstraction lands and decouples it
-//! from `AppHandle`. This test instead downloads each file with a plain `reqwest` GET
-//! against the same package-file route the download engine uses.
+//! COVERED as of the EventSink migration: the parallel download engine
+//! (`sync_client/download.rs::download_manifest_files`) — the 16-worker pool, checksum
+//! verification, sync-state persistence, and progress reporting. It used to require a
+//! Tauri `AppHandle` to emit progress events; now it takes an `Arc<dyn EventSink>`, so
+//! the test drives it end-to-end against the live server with a `CollectingEventSink`
+//! (see the second client phase below). The first client phase still downloads each file
+//! with a plain `reqwest` GET, exercising the raw package-file route directly.
+//!
+//! STILL NOT covered: mid-flight cancellation (the `cancel` AtomicBool flipping while
+//! workers are in flight -> `DownloadOutcome::Cancelled`) and resume-after-partial (a
+//! second `download_manifest_files` call adopting files a prior run left on disk and
+//! skipping them via sync-state). Both are worth a dedicated test; this one only drives
+//! the clean, from-empty happy path through the engine.
 
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use crate::instance_data::{
-    build_manifest, file_checksum, load_load_order, manifest_path, scan_and_merge_load_order,
+    build_manifest, file_checksum, load_load_order, manifest_path, package_abs_path,
+    scan_and_merge_load_order,
 };
 use crate::nerevar_server::state::ServerContext;
 use crate::nerevar_server::{serve, try_bind};
+use crate::reporter::CollectingEventSink;
 use crate::sync_auth::SYNC_PASSWORD_HEADER;
+use crate::sync_client::download::{download_manifest_files, DownloadOutcome};
 use crate::sync_client::{fetch_full_manifest, fetch_manifest_summary};
 use crate::sync_host::{new_shared_hosting_manifest_cache, new_shared_sync_host};
 
@@ -220,6 +233,109 @@ async fn host_client_sync_roundtrip() {
         }
     }
     assert_eq!(files_downloaded, 3, "should have downloaded all 3 files");
+
+    // ---- CLIENT: drive the REAL parallel download engine end-to-end ------------------
+    // Second client dir, downloaded through `download_manifest_files` — the same 16-worker
+    // pool / checksum-verify / sync-state path the Tauri sync flow calls, now decoupled
+    // from `AppHandle` and reported through an `EventSink`. Setup is minimal because the
+    // engine provisions its own package dirs and sync-state; we only supply a target data
+    // dir, the fetched manifest, a fresh cancel flag, and a collecting sink.
+    let engine_dir = root.join("client-engine");
+    std::fs::create_dir_all(&engine_dir).unwrap();
+
+    let sink = Arc::new(CollectingEventSink::default());
+    let cancel = Arc::new(AtomicBool::new(false));
+    let outcome = download_manifest_files(
+        sink.clone(),
+        "roundtrip-instance",
+        host,
+        port,
+        Some(SYNC_PASSWORD),
+        &engine_dir,
+        &fetched,
+        false,
+        cancel.clone(),
+    )
+    .await
+    .expect("engine download should succeed");
+
+    let engine_bytes_done = match outcome {
+        DownloadOutcome::Complete { bytes_done } => bytes_done,
+        DownloadOutcome::Cancelled { .. } => panic!("engine download must not be cancelled"),
+    };
+    assert_eq!(
+        engine_bytes_done, expected_total_bytes,
+        "engine should report every byte downloaded"
+    );
+
+    // Every manifest file must have landed at its real on-disk location with the right
+    // checksum — verified with the SAME function the manifest was built with.
+    let mut engine_files_verified = 0usize;
+    for pkg in &fetched.packages {
+        for file in &pkg.files {
+            let dest = package_abs_path(&engine_dir, &pkg.relative_dir).join(&file.path);
+            assert!(
+                dest.is_file(),
+                "engine should have written {} to disk",
+                dest.display()
+            );
+            let got = file_checksum(&dest).expect("engine-side checksum");
+            assert_eq!(got, file.checksum, "engine checksum mismatch for {}", file.path);
+            engine_files_verified += 1;
+        }
+    }
+    assert_eq!(engine_files_verified, 3, "engine should have written all 3 files");
+
+    // The sink must have observed progress: every event is a `sync-progress` with a
+    // camelCase payload (the frontend contract), and the terminal event the engine
+    // guarantees reports all bytes and files done under the Downloading phase.
+    let events = sink.events();
+    assert!(
+        !events.is_empty(),
+        "engine must emit at least one sync-progress event"
+    );
+    for (name, _) in &events {
+        assert_eq!(*name, "sync-progress", "engine only emits sync-progress events");
+    }
+
+    let (_, last) = events.last().expect("at least one event");
+    // camelCase keys are present; snake_case is NOT (proves the ts-rs serde contract).
+    for key in [
+        "instanceId",
+        "phase",
+        "message",
+        "bytesDone",
+        "bytesTotal",
+        "filesDone",
+        "filesTotal",
+        "overallPercent",
+    ] {
+        assert!(
+            last.get(key).is_some(),
+            "terminal event payload missing camelCase key {key}: {last}"
+        );
+    }
+    assert!(
+        last.get("bytes_done").is_none(),
+        "payload must be camelCase, not snake_case: {last}"
+    );
+
+    assert_eq!(last["instanceId"], "roundtrip-instance");
+    assert_eq!(last["phase"], "downloading");
+    assert_eq!(
+        last["bytesDone"], expected_total_bytes,
+        "terminal event bytesDone should equal total bytes"
+    );
+    assert_eq!(
+        last["bytesTotal"], expected_total_bytes,
+        "terminal event bytesTotal should equal total bytes"
+    );
+    assert_eq!(last["filesDone"], 3, "terminal event filesDone");
+    assert_eq!(last["filesTotal"], 3, "terminal event filesTotal");
+    assert_eq!(
+        last["overallPercent"], 85,
+        "Downloading at 100% of bytes maps to overallPercent 85"
+    );
 
     // ---- CLIENT: negatives ----------------------------------------------------------
     // Path traversal: fully percent-encoded so the URL layer does not collapse `..`

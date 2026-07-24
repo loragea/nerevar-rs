@@ -21,6 +21,7 @@ use crate::process_manager::{
     launch_tes3mp_client, launch_tes3mp_server, stop_tes3mp_process, GlobalProcessStatus,
     ProcessManager, ProcessRole,
 };
+use crate::reporter::{EventSink, TauriEventSink};
 use crate::sync_client::{
     fetch_manifest_summary, ping_nerevar_server, run_instance_sync, sync_if_needed,
     touch_last_synced, write_synced_client_connection, RemoteManifestSummary, SyncCoordinator,
@@ -132,8 +133,9 @@ pub async fn sync_instance_from_remote(
             .clone()
     };
 
+    let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.clone()));
     let validation =
-        run_instance_sync(app.clone(), coordinator.inner().clone(), &instance).await?;
+        run_instance_sync(sink, coordinator.inner().clone(), &instance).await?;
 
     if validation.valid {
         let data_dir = resolve_package_data_dir(&instance);
@@ -171,8 +173,9 @@ pub async fn launch_instance_client(
     };
 
     if instance.remote_host.is_some() {
+        let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.clone()));
         let validation = sync_if_needed(
-            app.clone(),
+            sink,
             coordinator.inner().clone(),
             &instance,
             false,

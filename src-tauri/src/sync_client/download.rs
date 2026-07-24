@@ -5,12 +5,12 @@ use std::time::{Duration, Instant};
 
 use reqwest::Client;
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter};
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinSet;
 
 use crate::instance_data::{package_abs_path, ManifestFileEntry, NerevarManifest};
+use crate::reporter::EventSink;
 use crate::sync_paths::normalize_manifest_file_path;
 use crate::sync_auth::SYNC_PASSWORD_HEADER;
 
@@ -69,7 +69,7 @@ impl ProgressThrottler {
 
 fn maybe_emit_progress(
     throttler: &ProgressThrottler,
-    app: &AppHandle,
+    sink: &dyn EventSink,
     instance_id: &str,
     phase: SyncPhase,
     message: impl Into<String>,
@@ -82,7 +82,7 @@ fn maybe_emit_progress(
 ) {
     if force || throttler.should_emit() {
         emit_sync_progress(
-            app,
+            sink,
             instance_id,
             phase,
             message,
@@ -304,7 +304,7 @@ async fn download_one_file(
 }
 
 pub async fn download_manifest_files(
-    app: AppHandle,
+    sink: Arc<dyn EventSink>,
     instance_id: &str,
     host: &str,
     port: u16,
@@ -328,7 +328,7 @@ pub async fn download_manifest_files(
             count_verified_in_manifest(manifest, &completed_before);
         let progress_throttler = Arc::new(ProgressThrottler::new());
         emit_sync_progress(
-            &app,
+            &*sink,
             instance_id,
             SyncPhase::VerifyingExisting,
             format!(
@@ -345,7 +345,7 @@ pub async fn download_manifest_files(
         let data_dir_owned = data_dir.to_path_buf();
         let manifest_owned = manifest.clone();
         let state_for_adopt = state.clone();
-        let app_for_adopt = app.clone();
+        let sink_for_adopt = sink.clone();
         let instance_for_adopt = instance_id.to_string();
         let throttler_for_adopt = progress_throttler.clone();
         tauri::async_runtime::spawn_blocking(move || {
@@ -357,7 +357,7 @@ pub async fn download_manifest_files(
                 Some(Box::new(move |bytes_done, bytes_total, files_done, files_total, current| {
                     maybe_emit_progress(
                         &throttler_for_adopt,
-                        &app_for_adopt,
+                        &*sink_for_adopt,
                         &instance_for_adopt,
                         SyncPhase::VerifyingExisting,
                         format!("Verified {files_done}/{files_total} files on disk"),
@@ -383,7 +383,7 @@ pub async fn download_manifest_files(
     let (verified_files, _) = count_verified_in_manifest(manifest, &completed);
     let files_already_verified = verified_files;
     emit_sync_progress(
-        &app,
+        &*sink,
         instance_id,
         SyncPhase::Downloading,
         if jobs.is_empty() {
@@ -425,7 +425,7 @@ pub async fn download_manifest_files(
     for _ in 0..worker_count {
         spawn_download_worker(
             &mut workers,
-            app.clone(),
+            sink.clone(),
             instance_id.to_string(),
             client.clone(),
             sync_password.clone(),
@@ -484,7 +484,7 @@ pub async fn download_manifest_files(
     }
 
     emit_sync_progress(
-        &app,
+        &*sink,
         instance_id,
         SyncPhase::Downloading,
         "Download complete",
@@ -503,7 +503,7 @@ pub async fn download_manifest_files(
 #[allow(clippy::too_many_arguments)]
 fn spawn_download_worker(
     workers: &mut JoinSet<Result<(), String>>,
-    app: AppHandle,
+    sink: Arc<dyn EventSink>,
     instance_id: String,
     client: Client,
     sync_password: Option<String>,
@@ -539,7 +539,7 @@ fn spawn_download_worker(
 
             maybe_emit_progress(
                 &progress_throttler,
-                &app,
+                &*sink,
                 &instance_id,
                 SyncPhase::Downloading,
                 format!("Downloaded {files_done_total}/{manifest_file_count} files"),

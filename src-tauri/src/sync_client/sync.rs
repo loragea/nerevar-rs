@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::State;
 
 use crate::data::InstanceConfig;
 use crate::instance_data::{
@@ -11,6 +11,7 @@ use crate::instance_data::{
     resolve_package_data_dir, resolve_synced_load_order, validate_manifest_against_disk,
     write_instance_launch_cfg, ManifestValidationResult, NerevarManifest, ResolvedOpenMwConfig,
 };
+use crate::reporter::{emit_event, EventSink};
 use crate::AppState;
 
 use super::apply::apply_manifest_to_load_order;
@@ -25,16 +26,16 @@ use super::sync_state::{
 use super::types::{InstanceSyncStatus, SyncPhase, SyncProgressEvent};
 
 pub async fn run_instance_sync(
-    app: AppHandle,
+    sink: Arc<dyn EventSink>,
     coordinator: Arc<SyncCoordinator>,
     instance: &InstanceConfig,
 ) -> Result<ManifestValidationResult, String> {
-    sync_if_needed(app, coordinator, instance, false).await
+    sync_if_needed(sink, coordinator, instance, false).await
 }
 
 /// When `force` is true, re-downloads every file. Otherwise resumes using sync-state checksums.
 pub async fn sync_if_needed(
-    app: AppHandle,
+    sink: Arc<dyn EventSink>,
     coordinator: Arc<SyncCoordinator>,
     instance: &InstanceConfig,
     force: bool,
@@ -53,7 +54,7 @@ pub async fn sync_if_needed(
     let cancel = coordinator.begin(&instance_id)?;
 
     let result = sync_if_needed_inner(
-        app.clone(),
+        sink.clone(),
         instance,
         &instance_id,
         host,
@@ -96,7 +97,7 @@ pub fn get_instance_sync_status(
 }
 
 async fn sync_if_needed_inner(
-    app: AppHandle,
+    sink: Arc<dyn EventSink>,
     instance: &InstanceConfig,
     instance_id: &str,
     host: &str,
@@ -111,7 +112,7 @@ async fn sync_if_needed_inner(
     }
 
     emit_sync_progress(
-        &app,
+        &*sink,
         instance_id,
         SyncPhase::CheckingUpdates,
         "Checking host manifest for updates",
@@ -145,7 +146,7 @@ async fn sync_if_needed_inner(
 
     if !needs_download {
         emit_sync_progress(
-            &app,
+            &*sink,
             instance_id,
             SyncPhase::Complete,
             "Already up to date",
@@ -167,7 +168,7 @@ async fn sync_if_needed_inner(
         if let Ok(status) = instance_sync_status(data_dir, &remote) {
             if status.can_resume {
                 emit_sync_progress(
-                    &app,
+                    &*sink,
                     instance_id,
                     SyncPhase::CheckingUpdates,
                     format!(
@@ -185,7 +186,7 @@ async fn sync_if_needed_inner(
     }
 
     emit_sync_progress(
-        &app,
+        &*sink,
         instance_id,
         SyncPhase::FetchingManifest,
         "Fetching manifest from host",
@@ -199,7 +200,7 @@ async fn sync_if_needed_inner(
     persist_manifest(data_dir, &remote)?;
 
     let download_result = download_manifest_files(
-        app.clone(),
+        sink.clone(),
         instance_id,
         host,
         port,
@@ -214,7 +215,7 @@ async fn sync_if_needed_inner(
     match download_result {
         DownloadOutcome::Complete { bytes_done } => {
             emit_sync_progress(
-                &app,
+                &*sink,
                 instance_id,
                 SyncPhase::ApplyingLoadOrder,
                 "Removing deleted mods and files",
@@ -245,9 +246,10 @@ async fn sync_if_needed_inner(
                     },
                 }
             });
-            let _ = app.emit(
+            emit_event(
+                &*sink,
                 "sync-progress",
-                SyncProgressEvent {
+                &SyncProgressEvent {
                     instance_id: instance_id.to_string(),
                     phase: SyncPhase::Cancelled,
                     message: format!(
@@ -284,7 +286,7 @@ async fn sync_if_needed_inner(
         }
     } else {
         emit_sync_progress(
-            &app,
+            &*sink,
             instance_id,
             SyncPhase::Validating,
             "Verifying downloaded files",
@@ -300,7 +302,7 @@ async fn sync_if_needed_inner(
     if !validation.valid {
         let message = format!("Validation failed ({} issues)", validation.issues.len());
         emit_sync_progress(
-            &app,
+            &*sink,
             instance_id,
             SyncPhase::Failed,
             message,
@@ -315,7 +317,7 @@ async fn sync_if_needed_inner(
 
     finalize_after_sync(instance, data_dir, &remote)?;
     emit_sync_progress(
-        &app,
+        &*sink,
         instance_id,
         SyncPhase::Complete,
         "Sync complete",
