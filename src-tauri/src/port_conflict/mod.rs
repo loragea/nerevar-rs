@@ -188,7 +188,8 @@ pub fn kill_process(pid: u32) -> Result<(), String> {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Failed to terminate PID {pid}: {stderr}".trim()));
+            let message = format!("Failed to terminate PID {pid}: {stderr}");
+            return Err(message.trim().to_string());
         }
     }
 
