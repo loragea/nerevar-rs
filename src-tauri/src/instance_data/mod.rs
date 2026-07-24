@@ -3,8 +3,10 @@ pub mod commands;
 // Mid-layer split (step 6): every non-command file (types, load-order, manifest build,
 // scan, resolver, progress, mo2 modlist import, ...) moved into nerevar-core. This
 // re-export keeps every existing `crate::instance_data::X` path in `commands.rs` and in
-// sibling app modules (`connection/`, `sync_client` residue, `sync_roundtrip_test.rs`)
-// resolving unchanged.
+// sibling app modules (`connection/`, `sync_client` residue) resolving unchanged.
+// (`sync_roundtrip_test.rs` used to be one of those consumers too; it relocated to
+// `nerevar-core/tests/sync_roundtrip.rs` in step 8 and now reaches these types directly
+// through `nerevar_core::instance_data`.)
 pub use nerevar_core::instance_data::*;
 
 #[cfg(test)]
