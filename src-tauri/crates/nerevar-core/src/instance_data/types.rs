@@ -3,12 +3,13 @@ use ts_rs::TS;
 
 use crate::instance_settings::InstanceSettings;
 
-// Moved to nerevar-core in the leaf-layer split (step 5) because
-// `instance_setup::required_data_files` (now core-side) takes/returns them
-// directly; `instance_data` itself doesn't move until a later step. Re-export
-// here so every existing `instance_data::{ResolvedOpenMwConfig,
-// RequiredDataFileEntry}` / `types::{..}` path keeps resolving unchanged.
-pub use nerevar_core::data::{RequiredDataFileEntry, ResolvedOpenMwConfig};
+// ResolvedOpenMwConfig/RequiredDataFileEntry moved into `data.rs` ahead of the rest of
+// `instance_data` in the leaf-layer split (step 5), because
+// `instance_setup::required_data_files` needed them directly and `data.rs` moved first.
+// Now that `instance_data` itself is core-side too (mid-layer split, step 6), this is a
+// plain intra-crate re-export rather than a cross-crate shim — still not moving the
+// structs back here, `instance_setup` keeps depending on `data.rs` directly.
+pub use crate::data::{RequiredDataFileEntry, ResolvedOpenMwConfig};
 
 pub const LOAD_ORDER_VERSION: u32 = 1;
 pub const MANIFEST_VERSION: u32 = 1;

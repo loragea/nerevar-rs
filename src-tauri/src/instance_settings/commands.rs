@@ -4,26 +4,17 @@ use std::sync::Mutex;
 use tauri::State;
 
 use crate::instance_data::{find_instance_by_id, resolve_package_data_dir};
-use crate::instance_setup::instance_tes3mp_dir;
 use crate::AppState;
 
-use super::defaults::{normalize_instance_settings, setting_definitions};
-use super::storage::{
-    load_instance_settings, save_instance_settings, write_launch_settings_overlay,
+// `apply_instance_settings_to_disk`, `normalize_instance_settings`, `setting_definitions`,
+// and `load_instance_settings` all moved into nerevar-core's `instance_settings` alongside
+// the rest of the module in the mid-layer split (step 6) — `apply_instance_settings_to_disk`
+// specifically because `instance_data::manifest::build_manifest` (core-side) calls it
+// directly. Reached here through the app crate's `instance_settings::*` re-export shim.
+use crate::instance_settings::{
+    apply_instance_settings_to_disk, load_instance_settings, normalize_instance_settings,
+    setting_definitions, InstanceSettings, SettingDefinition,
 };
-use super::tes3mp_lua::write_tes3mp_game_settings;
-use super::types::{InstanceSettings, SettingDefinition};
-
-pub fn apply_instance_settings_to_disk(
-    instance_root: &Path,
-    data_dir: &Path,
-    settings: &InstanceSettings,
-) -> Result<(), String> {
-    save_instance_settings(data_dir, settings)?;
-    write_launch_settings_overlay(data_dir, settings)?;
-    write_tes3mp_game_settings(&instance_tes3mp_dir(instance_root), settings)?;
-    Ok(())
-}
 
 #[tauri::command]
 pub fn get_instance_setting_definitions() -> Vec<SettingDefinition> {

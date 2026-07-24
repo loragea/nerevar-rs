@@ -7,8 +7,15 @@
 
 pub mod data;
 pub mod github_getters;
+pub mod instance_data;
 pub mod instance_setup;
+pub mod instance_settings;
+pub mod nerevar_server;
 pub mod openmw_ini_importer;
+pub mod port_conflict;
+pub mod process_manager;
 pub mod reporter;
 pub mod sync_auth;
+pub mod sync_client;
+pub mod sync_host;
 pub mod sync_paths;

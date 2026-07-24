@@ -89,7 +89,7 @@ pub fn directory_tree_checksum(
     Ok(result.tree_checksum)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub fn file_checksum(path: &Path) -> Result<String, String> {
     let relative = path
         .file_name()

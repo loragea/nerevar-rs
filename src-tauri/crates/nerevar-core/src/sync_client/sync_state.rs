@@ -26,9 +26,15 @@ fn file_key(package_id: &str, relative_path: &str) -> String {
     format!("{package_id}\x1f{relative_path}")
 }
 
+// `pub`, not `pub(crate)`: `sync_client` is now a genuinely public core module (the app
+// crate depends on it across a crate boundary), so `load_sync_state`/`sync_is_complete`
+// being `pub fn` requires their `SyncStateFile` parameter/return type to be at least as
+// visible — `pub(crate)` here would trip `private_interfaces` for real (it didn't before
+// the mid-layer split because the app crate's `sync_client` module itself was private,
+// capping everything inside at crate-internal reachability regardless of this annotation).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct SyncStateFile {
+pub struct SyncStateFile {
     pub manifest_generated_at: String,
     pub completed: HashMap<String, String>,
 }

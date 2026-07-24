@@ -1,19 +1,16 @@
 use std::path::Path;
 use std::process::Command;
-use std::sync::Mutex;
 
 use netstat2::{
     get_sockets_info, AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, TcpState,
 };
 use serde::{Deserialize, Serialize};
 use sysinfo::{Pid, ProcessesToUpdate, System};
-use tauri::State;
 use ts_rs::TS;
 
 use crate::data::NerevarConfig;
 use crate::instance_setup::{instance_tes3mp_dir, read_tes3mp_server_settings};
 use crate::reporter::{emit_event, EventSink};
-use crate::AppState;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -204,39 +201,6 @@ pub fn emit_port_conflicts(sink: &dyn EventSink, conflicts: Vec<PortConflict>) {
     emit_event(sink, "port-conflicts-detected", &conflicts);
 }
 
-#[tauri::command]
-pub fn check_port_conflicts(
-    state: State<'_, Mutex<AppState>>,
-) -> Result<Vec<PortConflict>, String> {
-    let guard = state.lock().map_err(|_| "App state lock poisoned".to_string())?;
-    check_startup_conflicts(&guard.nerevar_config)
-}
-
-#[tauri::command]
-pub fn kill_port_process(pid: u32) -> Result<(), String> {
-    kill_process(pid)
-}
-
-#[tauri::command]
-pub fn retry_sync_server(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let mut guard = state
-        .lock()
-        .map_err(|_| "App state lock poisoned".to_string())?;
-
-    if !guard.nerevar_config.onboarding_complete {
-        return Ok(());
-    }
-
-    let port = guard.nerevar_config.sync_port;
-    let next_retry = guard.server_retry_generation.wrapping_add(1);
-    guard.server_retry_generation = next_retry;
-
-    if let Some(tx) = guard.server_retry_tx.clone() {
-        let _ = tx.send(next_retry);
-    }
-    if let Some(tx) = guard.server_port_tx.clone() {
-        let _ = tx.send(port);
-    }
-
-    Ok(())
-}
+// The three `#[tauri::command]` wrappers (`check_port_conflicts`, `kill_port_process`,
+// `retry_sync_server`) stay app-side in `src-tauri/src/port_conflict.rs` — they read
+// `State<Mutex<AppState>>`, which doesn't move into core until step 7.

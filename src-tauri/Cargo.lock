@@ -2812,18 +2812,27 @@ dependencies = [
 name = "nerevar-core"
 version = "0.1.0"
 dependencies = [
+ "axum",
+ "chrono",
  "crc32fast",
+ "csv",
  "dirs",
  "encoding_rs",
  "flate2",
  "log",
+ "netstat2",
  "rayon",
  "reqwest",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "sysinfo",
  "tar",
  "tokio",
+ "tokio-util",
  "ts-rs",
+ "urlencoding",
+ "uuid",
  "zip",
 ]
 

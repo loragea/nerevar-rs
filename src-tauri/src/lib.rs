@@ -7,9 +7,7 @@ mod file_actions;
 mod instance_data;
 mod instance_settings;
 mod mo2_plugin;
-mod nerevar_server;
 mod port_conflict;
-mod process_manager;
 mod reporter;
 mod supervisor;
 mod sync_client;
@@ -23,8 +21,23 @@ pub(crate) use nerevar_core::data;
 pub(crate) use nerevar_core::github_getters;
 pub(crate) use nerevar_core::instance_setup;
 pub(crate) use nerevar_core::openmw_ini_importer;
+// `sync_auth`'s only remaining app-side consumer is `sync_roundtrip_test.rs`
+// (`#[cfg(test)]`): its production call sites (`nerevar_server`, `sync_client`) moved into
+// core in this same step (mid-layer split, step 6), so this shim is now test-only — gated
+// to avoid an unused-import warning on non-test builds. `sync_paths` has no remaining
+// app-side consumer at all (same reason) and its step-5 shim is dropped outright.
+#[cfg(test)]
 pub(crate) use nerevar_core::sync_auth;
-pub(crate) use nerevar_core::sync_paths;
+
+// nerevar-core module shims (mid-layer split, step 6): `process_manager` and
+// `nerevar_server` moved wholesale (no app-side command residue — process launching has
+// no #[tauri::command] fns of its own, and the embedded server has no Tauri surface at
+// all), so they're pure re-exports here like the step-5 leaf modules above.
+// `instance_data`/`instance_settings`/`sync_host`/`sync_client`/`port_conflict` are NOT
+// shimmed this way: each kept a real app-side file (its `commands.rs`, or `sync.rs` /
+// `port_conflict.rs`) that itself re-exports the rest of its core-side module.
+pub(crate) use nerevar_core::nerevar_server;
+pub(crate) use nerevar_core::process_manager;
 
 #[cfg(test)]
 mod sync_roundtrip_test;

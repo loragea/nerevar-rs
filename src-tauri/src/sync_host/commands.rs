@@ -14,8 +14,7 @@ use crate::sync_host::SharedHostingManifestCache;
 use crate::sync_client::ping_nerevar_server;
 use crate::AppState;
 
-use super::status::SyncHostStatus;
-use super::{activate_hosting, deactivate_hosting, SharedSyncHost};
+use super::{activate_hosting, deactivate_hosting, SharedSyncHost, SyncHostStatus};
 
 fn instance_name(config: &NerevarConfig, instance_id: &str) -> Option<String> {
     find_instance_by_id(config, instance_id).map(|instance| instance.name.clone())

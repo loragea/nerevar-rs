@@ -273,57 +273,6 @@ mod tests {
             .contains("No Linux x86_64 tar.gz asset found for release 123"));
     }
 
-    /// Test-local copy of `process_manager::spawn::find_executable`.
-    /// `process_manager` hasn't moved into nerevar-core yet (that's a later
-    /// migration step), and core can't depend back on the app crate, so this
-    /// ignored network test carries its own copy of the search rather than
-    /// reaching across the crate boundary. Revisit once process_manager
-    /// lands in core.
-    #[cfg(target_os = "linux")]
-    fn find_executable(
-        root: &std::path::Path,
-        names: &[&str],
-        max_depth: u32,
-    ) -> Option<std::path::PathBuf> {
-        if max_depth == 0 {
-            return None;
-        }
-
-        let mut best: Option<(usize, std::path::PathBuf)> = None;
-        let entries = std::fs::read_dir(root).ok()?;
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
-                    continue;
-                };
-                let rank = names.iter().position(|name| file_name.eq_ignore_ascii_case(name));
-                if let Some(rank) = rank {
-                    if best.as_ref().is_none_or(|(best_rank, _)| rank < *best_rank) {
-                        best = Some((rank, path));
-                    }
-                }
-            }
-        }
-        if let Some((_, path)) = best {
-            return Some(path);
-        }
-
-        if max_depth > 1 {
-            let entries = std::fs::read_dir(root).ok()?;
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    if let Some(found) = find_executable(&path, names, max_depth - 1) {
-                        return Some(found);
-                    }
-                }
-            }
-        }
-
-        None
-    }
-
     /// End-to-end check of the real Linux download path: hits the live GitHub
     /// API, downloads the ~58MB tes3mp-0.8.1 Linux tarball, extracts it, and
     /// verifies the client/server wrapper scripts land where the process
@@ -333,6 +282,7 @@ mod tests {
     #[ignore = "network: downloads ~58MB from GitHub"]
     #[cfg(target_os = "linux")]
     async fn downloads_and_extracts_linux_release_end_to_end() {
+        use crate::process_manager::spawn::find_executable;
         use std::os::unix::fs::PermissionsExt;
 
         let dir = std::env::temp_dir().join(format!(
