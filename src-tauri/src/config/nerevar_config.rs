@@ -10,7 +10,6 @@ use crate::instance_setup::{apply_server_defaults, create_instance_data_dir, ins
 use crate::reporter::{emit_event, EventSink};
 use crate::AppState;
 // use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use tauri::State;
 use log::info;
 use uuid::Uuid;
 
@@ -55,13 +54,13 @@ pub fn load_or_create_nerevar_config_at(config_path: &Path) -> Result<NerevarCon
 }
 
 pub fn load_or_create_nerevar_config(
-    state: State<'_, Mutex<AppState>>,
+    state: &Mutex<AppState>,
 ) -> Result<NerevarConfig, String> {
     let config_path = state.lock().unwrap().nerevar_config_path.clone();
     load_or_create_nerevar_config_at(Path::new(&config_path))
 }
 
-pub async fn complete_onboarding(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
+pub async fn complete_onboarding(state: &Mutex<AppState>) -> Result<(), String> {
     let (sink, config, start_sync_server) = {
         let mut state = state.lock().unwrap();
         let was_complete = state.nerevar_config.onboarding_complete;
@@ -168,7 +167,7 @@ fn start_sync_server_supervisor(state: &mut AppState) {
 //     });
 // }
 
-pub async fn set_root_path(state: State<'_, Mutex<AppState>>, path: String) -> Result<(), String> {
+pub async fn set_root_path(state: &Mutex<AppState>, path: String) -> Result<(), String> {
     let mut state = state.lock().unwrap();
     state.nerevar_config.root_path = Some(path);
     std::fs::write(
@@ -179,7 +178,7 @@ pub async fn set_root_path(state: State<'_, Mutex<AppState>>, path: String) -> R
     Ok(())
 }
 
-pub async fn set_sync_port(state: State<'_, Mutex<AppState>>, port: i32) -> Result<(), String> {
+pub async fn set_sync_port(state: &Mutex<AppState>, port: i32) -> Result<(), String> {
     if !(1..=65535).contains(&port) {
         return Err(format!("Sync port must be between 1 and 65535, got {port}"));
     }
@@ -254,7 +253,7 @@ pub fn build_synced_instance_config(new_connection: &NewConnectionConfig) -> Ins
 }
 
 fn persist_owned_instance_to_config(
-    state: &State<'_, Mutex<AppState>>,
+    state: &Mutex<AppState>,
     instance: InstanceConfig,
 ) -> Result<(NerevarConfig, Arc<dyn EventSink>), String> {
     let mut guard = state
@@ -282,7 +281,7 @@ fn persist_owned_instance_to_config(
 }
 
 pub fn persist_synced_instance_to_config(
-    state: &State<'_, Mutex<AppState>>,
+    state: &Mutex<AppState>,
     instance: InstanceConfig,
 ) -> Result<(NerevarConfig, Arc<dyn EventSink>), String> {
     let mut guard = state
@@ -310,7 +309,7 @@ pub fn persist_synced_instance_to_config(
 }
 
 pub fn update_synced_instance(
-    state: &State<'_, Mutex<AppState>>,
+    state: &Mutex<AppState>,
     instance: InstanceConfig,
 ) -> Result<NerevarConfig, String> {
     let mut guard = state
@@ -339,7 +338,7 @@ pub fn update_synced_instance(
 }
 
 pub fn update_owned_instance(
-    state: &State<'_, Mutex<AppState>>,
+    state: &Mutex<AppState>,
     instance: InstanceConfig,
 ) -> Result<NerevarConfig, String> {
     let mut guard = state
@@ -379,7 +378,7 @@ fn cleanup_failed_instance_root(path: &Path) {
 }
 
 pub async fn add_instance(
-    state: State<'_, Mutex<AppState>>,
+    state: &Mutex<AppState>,
     new_instance: NewInstanceConfig,
 ) -> Result<(), String> {
     let instance_root = Path::new(&new_instance.instance_root_path);
@@ -417,7 +416,7 @@ pub async fn add_instance(
     }
 
     let instance = build_instance_config(&new_instance);
-    let (config, sink) = persist_owned_instance_to_config(&state, instance)?;
+    let (config, sink) = persist_owned_instance_to_config(state, instance)?;
 
     emit_event(&*sink, "on_config_added_instance", &config);
     emit_event(&*sink, "on_config_change", &config);

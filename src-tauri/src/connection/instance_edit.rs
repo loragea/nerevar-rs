@@ -100,7 +100,7 @@ pub fn update_instance(
             )?;
             instance.tes3mp_server_port = Some(game_port);
         }
-        let config = update_synced_instance(&state, instance)?;
+        let config = update_synced_instance(state.inner(), instance)?;
         emit_event(&*sink, "on_config_change", &config);
     } else {
         update_server_connection_settings(
@@ -111,7 +111,7 @@ pub fn update_instance(
         )?;
         write_owned_client_connection(&tes3mp_dir)?;
         instance.tes3mp_server_port = Some(edit.port);
-        let config = update_owned_instance(&state, instance)?;
+        let config = update_owned_instance(state.inner(), instance)?;
         emit_event(&*sink, "on_config_change", &config);
     }
 

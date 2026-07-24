@@ -77,12 +77,12 @@ async fn download_and_run_nerevar_update(
 fn load_or_create_nerevar_config(
     state: State<'_, Mutex<AppState>>,
 ) -> Result<NerevarConfig, String> {
-    config::load_or_create_nerevar_config(state)
+    config::load_or_create_nerevar_config(state.inner())
 }
 
 #[tauri::command]
 async fn complete_onboarding(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    config::complete_onboarding(state)
+    config::complete_onboarding(state.inner())
         .await
         .map_err(|e| e.to_string())
 }
@@ -109,14 +109,14 @@ fn open_directory(path: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn set_root_path(state: State<'_, Mutex<AppState>>, path: String) -> Result<(), String> {
-    config::set_root_path(state, path)
+    config::set_root_path(state.inner(), path)
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn set_sync_port(state: State<'_, Mutex<AppState>>, port: i32) -> Result<(), String> {
-    config::set_sync_port(state, port)
+    config::set_sync_port(state.inner(), port)
         .await
         .map_err(|e| e.to_string())
 }
@@ -126,7 +126,7 @@ async fn add_instance(
     state: State<'_, Mutex<AppState>>,
     new_instance: NewInstanceConfig,
 ) -> Result<(), String> {
-    config::add_instance(state, new_instance).await
+    config::add_instance(state.inner(), new_instance).await
 }
 
 // #[tauri::command]
@@ -172,7 +172,9 @@ pub fn run() {
                 .to_string_lossy()
                 .to_string();
 
-            let config = config::load_or_create_nerevar_config(app.state()).unwrap();
+            let config =
+                config::load_or_create_nerevar_config(app.state::<Mutex<AppState>>().inner())
+                    .unwrap();
 
             // Set the config
             app.state::<Mutex<AppState>>()

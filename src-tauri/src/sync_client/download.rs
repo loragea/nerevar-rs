@@ -348,7 +348,7 @@ pub async fn download_manifest_files(
         let sink_for_adopt = sink.clone();
         let instance_for_adopt = instance_id.to_string();
         let throttler_for_adopt = progress_throttler.clone();
-        tauri::async_runtime::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             adopt_existing_files_into_state(
                 &data_dir_owned,
                 &manifest_owned,

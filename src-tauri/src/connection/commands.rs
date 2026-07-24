@@ -106,7 +106,7 @@ pub async fn add_synced_connection(
     let mut instance = build_synced_instance_config(&new_connection);
     instance.tes3mp_server_port = Some(summary.tes3mp_server_port);
     let instance_id = instance.id.clone();
-    let (config, sink) = persist_synced_instance_to_config(&state, instance)?;
+    let (config, sink) = persist_synced_instance_to_config(state.inner(), instance)?;
 
     emit_event(&*sink, "on_config_added_connection", &config);
     emit_event(&*sink, "on_config_change", &config);
@@ -137,7 +137,7 @@ pub async fn sync_instance_from_remote(
         let manifest = load_manifest(&data_dir)?;
         let mut updated = instance;
         touch_last_synced(&mut updated, &manifest);
-        let config = update_synced_instance(&state, updated)?;
+        let config = update_synced_instance(state.inner(), updated)?;
         emit_event(&*sink, "on_config_change", &config);
     }
 
@@ -194,7 +194,7 @@ pub async fn launch_instance_client(
         if updated.tes3mp_server_port != instance.tes3mp_server_port
             || updated.last_synced_at != instance.last_synced_at
         {
-            let config = update_synced_instance(&state, updated)?;
+            let config = update_synced_instance(state.inner(), updated)?;
             emit_event(&*sink, "on_config_change", &config);
         }
     } else {
