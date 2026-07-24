@@ -3,9 +3,10 @@ use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, State};
 
-use crate::config::nerevar_config::{
-    build_synced_instance_config, persist_synced_instance_to_config, update_synced_instance,
+use nerevar_core::config::nerevar_config::{
+    build_synced_instance_config, persist_synced_instance_to_config,
 };
+use crate::config::update_synced_instance;
 use crate::data::NewConnectionConfig;
 use crate::instance_data::find_instance_by_id;
 use crate::instance_data::{

@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-// use std::time::Duration;
 
 use crate::data::{InstanceConfig, NerevarConfig, NewConnectionConfig, NewInstanceConfig};
 use crate::port_conflict;
@@ -9,21 +8,25 @@ use crate::instance_data::ensure_instance_data_layout;
 use crate::instance_setup::{apply_server_defaults, create_instance_data_dir, instance_tes3mp_dir};
 use crate::reporter::{emit_event, EventSink};
 use crate::AppState;
-// use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use log::info;
 use uuid::Uuid;
 
 const CONFIG_FILE_NAME: &str = "config.json";
 // const TES3MP_081_RELEASE_ID: &str = "65767406";
 
-/// Same path as `app.path().app_data_dir()` / `config.json` (see Tauri `PathResolver::app_data_dir`).
-pub fn nerevar_config_file_path() -> Result<PathBuf, String> {
-    let context: tauri::Context<tauri::Wry> = tauri::generate_context!();
-    let identifier = context.config().identifier.clone();
+/// Same path as `app.path().app_data_dir()` / `config.json` (see Tauri
+/// `PathResolver::app_data_dir`). Top-layer split (step 7, see
+/// notes/core-split-plan.md): this used to call `tauri::generate_context!()`
+/// itself to get the app identifier; now it takes the identifier as a plain
+/// parameter so core stays Tauri-free. The app-side wrapper
+/// (`src-tauri/src/config/mod.rs`) resolves `context.config().identifier` via
+/// `tauri::generate_context!()` and passes it in here — no duplicated
+/// identifier constant on either side.
+pub fn nerevar_config_file_path(identifier: &str) -> PathBuf {
     let app_data_dir = dirs::data_dir()
-        .ok_or_else(|| "Failed to resolve app data directory".to_string())?
+        .expect("Failed to resolve app data directory")
         .join(identifier);
-    Ok(app_data_dir.join(CONFIG_FILE_NAME))
+    app_data_dir.join(CONFIG_FILE_NAME)
 }
 
 pub fn load_or_create_nerevar_config_at(config_path: &Path) -> Result<NerevarConfig, String> {
@@ -90,7 +93,13 @@ pub async fn complete_onboarding(state: &Mutex<AppState>) -> Result<(), String> 
 
     if start_sync_server {
         let sink = sink.clone();
-        tauri::async_runtime::spawn(async move {
+        // `tokio::spawn`, not `tauri::async_runtime::spawn` (step 7 signature
+        // prep, see notes/core-split-plan.md): this fn now lives in core,
+        // which has no Tauri runtime to reach for. Same underlying Tokio
+        // runtime either way — the app's Tauri build already runs on one, and
+        // this spawn only needs to outlive the calling command, not the
+        // process, so the swap is behavior-preserving.
+        tokio::spawn(async move {
             if let Ok(conflicts) = port_conflict::check_startup_conflicts(&config) {
                 port_conflict::emit_port_conflicts(&*sink, conflicts);
             }
@@ -116,56 +125,6 @@ fn start_sync_server_supervisor(state: &mut AppState) {
         let _ = tx.send(next_retry);
     }
 }
-
-// pub fn spawn_config_file_watcher(app: AppHandle) {
-//     tauri::async_runtime::spawn(async move {
-//         let config_path = app
-//             .state::<Mutex<AppState>>()
-//             .lock()
-//             .expect("config state poisoned")
-//             .nerevar_config_path
-//             .clone();
-
-//         let _ = tauri::async_runtime::spawn_blocking(move || {
-//             let path = PathBuf::from(&config_path);
-//             let watch_path = path.clone();
-
-//             let mut watcher = RecommendedWatcher::new(
-//                 move |result: Result<notify::Event, notify::Error>| {
-//                     let Ok(event) = result else { return };
-//                     if !matches!(event.kind, EventKind::Modify(_)) {
-//                         return;
-//                     }
-
-//                     let Ok(config) = load_or_create_nerevar_config_at(&watch_path) else {
-//                         return;
-//                     };
-
-//                     let state = app.state::<Mutex<AppState>>();
-//                     if let Ok(mut app_state) = state.lock() {
-//                         app_state.nerevar_config = config.clone();
-//                     }
-
-//                     let _ = app.emit("on_config_change", config);
-//                     info!("Config file changed externally, emitting event and updating app state");
-//                 },
-//                 notify::Config::default(),
-//             )
-//             .expect("failed to create config watcher");
-
-//             watcher
-//                 .watch(&path, RecursiveMode::NonRecursive)
-//                 .expect("failed to watch config file");
-
-//             info!("Watching config file at {}", path.display());
-
-//             loop {
-//                 std::thread::sleep(Duration::from_secs(3600));
-//             }
-//         })
-//         .await;
-//     });
-// }
 
 pub async fn set_root_path(state: &Mutex<AppState>, path: String) -> Result<(), String> {
     let mut state = state.lock().unwrap();

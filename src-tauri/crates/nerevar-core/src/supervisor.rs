@@ -2,12 +2,13 @@
 //! supervisor loop that (re)starts the server as its port, retry, and
 //! enabled signals change.
 //!
-//! Core-bound (see notes/core-split-plan.md): once nerevar-core exists this
-//! module has no direct Tauri dependency — `run_server_supervisor` already
+//! Top-layer split (step 7, see notes/core-split-plan.md): moved into
+//! nerevar-core wholesale — already Tauri-free, since `run_server_supervisor`
 //! spawns its worker tasks with `tokio::spawn` rather than
-//! `tauri::async_runtime::spawn`, since it always runs inside a Tokio
-//! runtime regardless of which binary (Tauri app or headless daemon) drives
-//! it.
+//! `tauri::async_runtime::spawn`, as it always runs inside a Tokio runtime
+//! regardless of which binary (Tauri app or headless daemon) drives it. The
+//! app crate's top-level setup spawns still use `tauri::async_runtime::spawn`
+//! to enter this module's async fns (by design until the host exists).
 
 use std::sync::Arc;
 

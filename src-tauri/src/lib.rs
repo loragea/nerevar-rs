@@ -1,5 +1,4 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-mod app_state;
 mod app_update;
 mod config;
 mod connection;
@@ -9,7 +8,6 @@ mod instance_settings;
 mod mo2_plugin;
 mod port_conflict;
 mod reporter;
-mod supervisor;
 mod sync_client;
 mod sync_host;
 
@@ -20,12 +18,15 @@ mod sync_host;
 pub(crate) use nerevar_core::data;
 pub(crate) use nerevar_core::github_getters;
 pub(crate) use nerevar_core::instance_setup;
-pub(crate) use nerevar_core::openmw_ini_importer;
 // `sync_auth`'s only remaining app-side consumer is `sync_roundtrip_test.rs`
 // (`#[cfg(test)]`): its production call sites (`nerevar_server`, `sync_client`) moved into
 // core in this same step (mid-layer split, step 6), so this shim is now test-only — gated
 // to avoid an unused-import warning on non-test builds. `sync_paths` has no remaining
 // app-side consumer at all (same reason) and its step-5 shim is dropped outright.
+// `openmw_ini_importer`'s only remaining app-side consumers
+// (`validate_global_openmw_config`/`generate_default_global_openmw_config`) moved into
+// core's `config::nerevar_config` in the top-layer split (step 7), so this shim is now
+// unused and dropped outright too — same reasoning as `sync_paths`.
 #[cfg(test)]
 pub(crate) use nerevar_core::sync_auth;
 
@@ -39,10 +40,22 @@ pub(crate) use nerevar_core::sync_auth;
 pub(crate) use nerevar_core::nerevar_server;
 pub(crate) use nerevar_core::process_manager;
 
+// nerevar-core module shims (top-layer split, step 7): `app_state` and
+// `supervisor` moved wholesale (no app-side command residue — `AppState` is
+// a plain data type with no `#[tauri::command]` fns of its own, and the
+// supervisor's async fns are called directly from `run()` below, not
+// exposed as commands), so they're pure re-exports like the mid-layer
+// modules above. `config`/`connection`/`port_conflict`/`instance_data`/
+// `instance_settings`/`sync_host`/`sync_client` are NOT shimmed this way:
+// each keeps a real app-side file (its `mod.rs`, `commands.rs`, or
+// `instance_delete.rs`/`instance_edit.rs`) that itself re-exports the rest
+// of its core-side module.
+pub(crate) use nerevar_core::supervisor;
+pub(crate) use nerevar_core::AppState;
+
 #[cfg(test)]
 mod sync_roundtrip_test;
 
-pub(crate) use crate::app_state::AppState;
 use crate::data::GithubReleaseResponse;
 use crate::data::NerevarConfig;
 use crate::data::NewInstanceConfig;
@@ -177,7 +190,6 @@ pub fn run() {
                 .lock()
                 .unwrap()
                 .nerevar_config_path = config::nerevar_config_file_path()
-                .expect("Failed to resolve config path")
                 .to_string_lossy()
                 .to_string();
 
