@@ -13,6 +13,7 @@ mod nerevar_server;
 mod openmw_ini_importer;
 mod port_conflict;
 mod process_manager;
+mod reporter;
 mod sync_auth;
 mod sync_client;
 mod sync_host;
