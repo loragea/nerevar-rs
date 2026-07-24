@@ -19,7 +19,9 @@ mod bindings {
     /// `src/types/*.ts`.
     #[test]
     fn export_bindings() {
-        let cfg = Config::default();
+        // See nerevar-core's instance_data::bindings::export_bindings for why
+        // this is from_env() and not default().
+        let cfg = Config::from_env();
         AppUpdateStatus::export_all(&cfg).expect("export AppUpdateStatus");
         AppUpdateRelease::export_all(&cfg).expect("export AppUpdateRelease");
     }

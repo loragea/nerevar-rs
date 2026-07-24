@@ -69,7 +69,12 @@ mod bindings {
     /// mid-layer split (step 6).
     #[test]
     fn export_bindings() {
-        let cfg = Config::default();
+        // `from_env()`, not `default()`: honors `TS_RS_EXPORT_DIR` (set by
+        // `.cargo/config.toml` to `../src/types`) the same way the derive
+        // macro's generated `export_bindings_*` tests do. `default()` would
+        // silently write to `./bindings` instead, leaving a stray untracked
+        // `bindings/` dir under whichever crate's `cargo test` ran.
+        let cfg = Config::from_env();
         NerevarManifest::export_all(&cfg).expect("export manifest graph");
         Mo2ModlistImportReport::export_all(&cfg).expect("export Mo2ModlistImportReport");
         Mo2ModlistImportResult::export_all(&cfg).expect("export Mo2ModlistImportResult");
