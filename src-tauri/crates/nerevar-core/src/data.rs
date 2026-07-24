@@ -142,3 +142,27 @@ pub struct GithubReleaseResponse {
     pub zipball_url: String,
     pub body: String,
 }
+
+// `ResolvedOpenMwConfig` and `RequiredDataFileEntry` originally lived in the
+// app crate's `instance_data::types`. `instance_setup::required_data_files`
+// (moved here in the same step) takes/returns them directly, and
+// `instance_data` doesn't move until a later step, so they relocate here
+// ahead of the rest of `instance_data` to avoid a core -> app dependency.
+// `instance_data::types` re-exports both so its own consumers (including
+// `NerevarManifest`, which embeds them) are unaffected.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct ResolvedOpenMwConfig {
+    pub encoding: String,
+    pub data_paths: Vec<String>,
+    pub content: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RequiredDataFileEntry {
+    pub file: String,
+    pub checksums: Vec<String>,
+}

@@ -6,6 +6,7 @@ use super::importer::{
     parse_cfg_contents, quote_data_path, resolve_morrowind_ini, ImportOptions, IniEncoding,
     MultiStrMap,
 };
+use super::settings_merge::{merge_settings_overlay, merge_user_session_changes};
 
 pub const OPENMW_CFG: &str = "openmw.cfg";
 pub const OPENMW_BACKUP_CFG: &str = "openmw.backup.cfg";
@@ -225,7 +226,7 @@ fn apply_launch_settings_overlay(
     } else {
         String::new()
     };
-    let composed = crate::instance_settings::merge_settings_overlay(&base, &overlay);
+    let composed = merge_settings_overlay(&base, &overlay);
     fs::write(&paths.settings_active, composed).map_err(|e| {
         format!(
             "Failed to write active OpenMW settings at {}: {e}",
@@ -316,7 +317,7 @@ fn apply_settings_restore(
                             paths.settings_active.display()
                         )
                     })?;
-                    crate::instance_settings::merge_user_session_changes(
+                    merge_user_session_changes(
                         &backup,
                         &active,
                         overlay_contents,

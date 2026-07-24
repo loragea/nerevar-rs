@@ -4,6 +4,7 @@ mod fallback_keys;
 mod global_cfg;
 mod importer;
 mod plugin_index;
+mod settings_merge;
 
 pub use global_cfg::{
     begin_global_openmw_launch, read_first_global_data_path, read_nerevar_base_data_path,

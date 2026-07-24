@@ -2811,6 +2811,21 @@ dependencies = [
 [[package]]
 name = "nerevar-core"
 version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "dirs",
+ "encoding_rs",
+ "flate2",
+ "log",
+ "rayon",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tar",
+ "tokio",
+ "ts-rs",
+ "zip",
+]
 
 [[package]]
 name = "netlink-packet-core"

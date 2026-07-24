@@ -3,6 +3,13 @@ use ts_rs::TS;
 
 use crate::instance_settings::InstanceSettings;
 
+// Moved to nerevar-core in the leaf-layer split (step 5) because
+// `instance_setup::required_data_files` (now core-side) takes/returns them
+// directly; `instance_data` itself doesn't move until a later step. Re-export
+// here so every existing `instance_data::{ResolvedOpenMwConfig,
+// RequiredDataFileEntry}` / `types::{..}` path keeps resolving unchanged.
+pub use nerevar_core::data::{RequiredDataFileEntry, ResolvedOpenMwConfig};
+
 pub const LOAD_ORDER_VERSION: u32 = 1;
 pub const MANIFEST_VERSION: u32 = 1;
 
@@ -91,15 +98,6 @@ pub struct ManifestPackage {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
-pub struct ResolvedOpenMwConfig {
-    pub encoding: String,
-    pub data_paths: Vec<String>,
-    pub content: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export)]
 pub struct NerevarManifest {
     pub version: u32,
     pub instance_id: String,
@@ -123,14 +121,6 @@ pub struct NerevarManifest {
 
 fn default_required_data_files() -> Vec<RequiredDataFileEntry> {
     Vec::new()
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export)]
-pub struct RequiredDataFileEntry {
-    pub file: String,
-    pub checksums: Vec<String>,
 }
 
 fn default_tes3mp_server_port() -> u16 {

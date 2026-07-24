@@ -3,23 +3,28 @@ mod app_state;
 mod app_update;
 mod config;
 mod connection;
-mod data;
 mod file_actions;
-mod github_getters;
 mod instance_data;
 mod instance_settings;
-mod instance_setup;
 mod mo2_plugin;
 mod nerevar_server;
-mod openmw_ini_importer;
 mod port_conflict;
 mod process_manager;
 mod reporter;
 mod supervisor;
-mod sync_auth;
 mod sync_client;
 mod sync_host;
-mod sync_paths;
+
+// nerevar-core module shims (leaf-layer split, step 5): these modules now
+// live in nerevar-core; re-exporting them here as `crate::x` keeps every
+// existing `crate::data::...`, `crate::instance_setup::...`, etc. path in
+// untouched files resolving unchanged.
+pub(crate) use nerevar_core::data;
+pub(crate) use nerevar_core::github_getters;
+pub(crate) use nerevar_core::instance_setup;
+pub(crate) use nerevar_core::openmw_ini_importer;
+pub(crate) use nerevar_core::sync_auth;
+pub(crate) use nerevar_core::sync_paths;
 
 #[cfg(test)]
 mod sync_roundtrip_test;

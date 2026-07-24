@@ -50,3 +50,10 @@ csv = "1.3"
 rayon = "1.10"
 netstat2 = "0.11.2"
 sysinfo = "0.37.2"
+
+[dev-dependencies]
+# Enables nerevar-core's test-only CollectingEventSink for this crate's own
+# tests (e.g. sync_roundtrip_test.rs, instance_data::progress::tests).
+# cfg(test) inside nerevar-core only covers *its own* unit tests; dependent
+# crates need the feature to reach the type from their test builds.
+nerevar-core = { path = "crates/nerevar-core", features = ["test-util"] }

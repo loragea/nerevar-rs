@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crc32fast::Hasher;
 
-use crate::instance_data::{RequiredDataFileEntry, ResolvedOpenMwConfig};
+use crate::data::{RequiredDataFileEntry, ResolvedOpenMwConfig};
 use crate::openmw_ini_importer::PluginIndex;
 
 const REQUIRED_DATA_FILES: &str = "requiredDataFiles.json";

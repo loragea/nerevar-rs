@@ -45,7 +45,7 @@ pub fn current_app_version() -> String {
 
 pub async fn check_for_update() -> Result<AppUpdateStatus, String> {
     let current_version = current_app_version();
-    let releases = github_getters::get_nerevar_releases().await?;
+    let releases = github_getters::get_nerevar_releases(NEREVAR_REPO).await?;
 
     let Some(latest) = find_latest_release(&releases) else {
         return Ok(AppUpdateStatus {
@@ -73,7 +73,7 @@ pub async fn check_for_update() -> Result<AppUpdateStatus, String> {
 }
 
 pub async fn download_and_run_installer(release_id: u64) -> Result<(), String> {
-    let releases = github_getters::get_nerevar_releases().await?;
+    let releases = github_getters::get_nerevar_releases(NEREVAR_REPO).await?;
     let release = releases
         .iter()
         .find(|release| release.id == release_id)

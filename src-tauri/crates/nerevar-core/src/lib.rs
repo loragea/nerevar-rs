@@ -1,9 +1,14 @@
 //! `nerevar-core`: the Tauri-free heart of Nerevar.
 //!
-//! This crate will hold the instance, sync, and process-management logic
-//! that today lives in the `nerevar` (src-tauri) crate, so it can be reused
-//! by both the Tauri desktop app and a future headless `nerevar-host`
-//! daemon. It is intentionally empty for now — this is step 4 of the
-//! nerevar-core split (see the PM plan doc), which only introduces the
-//! cargo workspace and wires up the dependency. Module moves happen in
-//! later steps.
+//! Holds instance, sync, and process-management logic shared by the Tauri
+//! desktop app and (eventually) a headless `nerevar-host` daemon. Modules
+//! land here incrementally — see the PM plan doc's migration sequence for
+//! what has moved so far and what's still app-side.
+
+pub mod data;
+pub mod github_getters;
+pub mod instance_setup;
+pub mod openmw_ini_importer;
+pub mod reporter;
+pub mod sync_auth;
+pub mod sync_paths;
