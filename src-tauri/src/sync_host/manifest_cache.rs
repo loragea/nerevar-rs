@@ -137,6 +137,7 @@ mod tests {
         std::fs::create_dir_all(&data_dir).unwrap();
 
         let manifest_path = manifest_path(&data_dir);
+        std::fs::create_dir_all(manifest_path.parent().unwrap()).unwrap();
         std::fs::write(
             &manifest_path,
             r#"{
@@ -161,7 +162,7 @@ mod tests {
                 "tes3mpServerPort": 25565,
                 "tes3mpServerPassword": "",
                 "requiredDataFiles": [],
-                "instanceSettings": {}
+                "instanceSettings": { "version": 1, "tes3mpGameSettings": [] }
             }"#,
         )
         .unwrap();
