@@ -2783,6 +2783,7 @@ dependencies = [
  "dirs",
  "encoding_rs",
  "flate2",
+ "log",
  "netstat2",
  "notify",
  "opener",

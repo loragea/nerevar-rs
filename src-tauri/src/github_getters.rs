@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::{copy, Cursor};
 use std::path::Path;
 use tar::Archive;
-use tauri_plugin_log::log::{error, info};
+use log::{error, info};
 
 pub async fn get_all_releases() -> Result<Vec<GithubReleaseResponse>, String> {
     fetch_github_releases("tes3mp/tes3mp", "Tes3MP").await

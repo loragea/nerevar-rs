@@ -11,7 +11,7 @@ use crate::reporter::{emit_event, EventSink};
 use crate::AppState;
 // use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use tauri::State;
-use tauri_plugin_log::log::info;
+use log::info;
 use uuid::Uuid;
 
 const CONFIG_FILE_NAME: &str = "config.json";
@@ -71,7 +71,7 @@ pub async fn complete_onboarding(state: State<'_, Mutex<AppState>>) -> Result<()
             serde_json::to_string_pretty(&state.nerevar_config).map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
-        tauri_plugin_log::log::info!("Onboarding marked as complete in config and app state");
+        log::info!("Onboarding marked as complete in config and app state");
 
         if !was_complete {
             start_sync_server_supervisor(&mut state);

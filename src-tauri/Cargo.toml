@@ -30,6 +30,7 @@ rfd = "0.17.2"
 axum = "0.8.9"
 dirs = "6"
 tauri-plugin-log = { version = "2", features = ["colored"] }
+log = "0.4"
 notify = { version = "8.2.0", features = ["serde"] }
 uuid = {version = "1.23.1", features = ["v4"] }
 zip = "8.6.0"

@@ -157,7 +157,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
-                .level(tauri_plugin_log::log::LevelFilter::Info)
+                .level(log::LevelFilter::Info)
                 .build(),
         )
         .setup(|app| {
@@ -261,13 +261,13 @@ pub fn run() {
                         match nerevar_server::try_bind(port).await {
                             Ok(listener) => {
                                 if let Err(err) = nerevar_server::serve(listener, ctx).await {
-                                    tauri_plugin_log::log::error!(
+                                    log::error!(
                                         "NEREVAR SERVER: stopped on port {port}: {err}"
                                     );
                                 }
                             }
                             Err(err) => {
-                                tauri_plugin_log::log::error!(
+                                log::error!(
                                     "NEREVAR SERVER: failed to bind on port {port}: {err}"
                                 );
                                 if port_conflict::is_addr_in_use_error(&err) {
@@ -299,7 +299,7 @@ pub fn run() {
                                             );
                                         }
                                         Err(parse_err) => {
-                                            tauri_plugin_log::log::error!(
+                                            log::error!(
                                                 "Failed to inspect port {port}: {parse_err}"
                                             );
                                         }
@@ -313,13 +313,13 @@ pub fn run() {
                 let mut port = *rx.borrow();
 
                 if *enabled_rx.borrow() {
-                    tauri_plugin_log::log::info!(
+                    log::info!(
                         "NEREVAR SERVER: starting on port {port}"
                     );
                     current_task =
                         Some(start(port, server_ctx.clone(), sink.clone()));
                 } else {
-                    tauri_plugin_log::log::info!(
+                    log::info!(
                         "NEREVAR SERVER: waiting for onboarding to complete"
                     );
                     current_task = None;
@@ -340,7 +340,7 @@ pub fn run() {
                             }
 
                             port = *rx.borrow();
-                            tauri_plugin_log::log::info!(
+                            log::info!(
                                 "NEREVAR SERVER: onboarding complete — starting on port {port}"
                             );
                             if let Some(task) = current_task.take() {
@@ -357,7 +357,7 @@ pub fn run() {
                                 continue;
                             }
                             port = *rx.borrow();
-                            tauri_plugin_log::log::info!(
+                            log::info!(
                                 "NEREVAR SERVER: restarting on port {port}"
                             );
                             if let Some(task) = current_task.take() {
@@ -373,7 +373,7 @@ pub fn run() {
                             if !*enabled_rx.borrow() {
                                 continue;
                             }
-                            tauri_plugin_log::log::info!(
+                            log::info!(
                                 "NEREVAR SERVER: retrying bind on port {port}"
                             );
                             if let Some(task) = current_task.take() {

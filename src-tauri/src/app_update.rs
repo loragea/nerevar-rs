@@ -4,9 +4,9 @@ use std::process::Command;
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tauri_plugin_log::log::info;
+use log::info;
 #[cfg(not(windows))]
-use tauri_plugin_log::log::error;
+use log::error;
 use ts_rs::TS;
 
 use crate::data::{GithubAssetResponse, GithubReleaseResponse};

@@ -3,7 +3,7 @@ pub mod state;
 
 use std::sync::Arc;
 
-use tauri_plugin_log::log::info;
+use log::info;
 
 pub async fn try_bind(port: i32) -> Result<tokio::net::TcpListener, String> {
     let addr = format!("0.0.0.0:{port}");

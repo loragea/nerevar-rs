@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::data::NewInstanceConfig;
-use tauri_plugin_log::log::info;
+use log::info;
 
 const SERVER_DEFAULTS_CFG: &str = "tes3mp-server-default.cfg";
 const CLIENT_DEFAULTS_CFG: &str = "tes3mp-client-default.cfg";

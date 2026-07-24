@@ -154,7 +154,7 @@ pub fn launch_tes3mp_client(
         exe.parent().unwrap_or(&tes3mp_dir),
     );
 
-    tauri_plugin_log::log::info!(
+    log::info!(
         "Launching TES3MP client using global openmw.cfg swap and launch overlay at {}",
         launch_cfg.display()
     );

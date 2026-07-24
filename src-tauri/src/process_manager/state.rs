@@ -50,7 +50,7 @@ impl ProcessManager {
             .and_then(|mut guard| guard.take());
         if let Some(session) = session {
             if let Err(err) = crate::openmw_ini_importer::restore_global_openmw_launch(session) {
-                tauri_plugin_log::log::error!(
+                log::error!(
                     "Failed to restore global OpenMW config after TES3MP launch: {err}"
                 );
             }

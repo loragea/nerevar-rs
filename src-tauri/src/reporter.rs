@@ -13,7 +13,7 @@
 
 use serde::Serialize;
 use tauri::Emitter;
-use tauri_plugin_log::log::warn;
+use log::warn;
 
 /// Sink for backend events destined for a UI, log, or test.
 pub trait EventSink: Send + Sync + 'static {
