@@ -27,9 +27,10 @@ const SUBTITLE_OPTIONS = [
 ];
 
 const getRandomSubtitle = (currentSubtitle: string) => {
-  return SUBTITLE_OPTIONS.filter((subtitle) => subtitle !== currentSubtitle)[
-    Math.floor(Math.random() * SUBTITLE_OPTIONS.length)
-  ];
+  const options = SUBTITLE_OPTIONS.filter(
+    (subtitle) => subtitle !== currentSubtitle,
+  );
+  return options[Math.floor(Math.random() * options.length)];
 };
 
 function NotFound() {
