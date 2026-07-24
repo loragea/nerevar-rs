@@ -14,6 +14,10 @@ import {
   OnboardingStepCard,
   StepActions,
 } from "@/features/onboarding/components/onboarding-step-shell";
+import {
+  exampleDataDirPath,
+  exampleMorrowindDataFilesPath,
+} from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -311,7 +315,7 @@ function MorrowindInstallationStep({ onNext }: { onNext: () => void }) {
               <Input
                 id="morrowind-installation-path"
                 readOnly
-                placeholder="C:\Program Files (x86)\Steam\steamapps\common\Morrowind\Data Files"
+                placeholder={exampleMorrowindDataFilesPath()}
                 value={morrowindInstallationPath}
                 className="font-mono text-xs bg-input/40 truncate"
               />
@@ -387,7 +391,7 @@ function SelectDataDirStep({ onNext }: { onNext: () => void }) {
             <Input
               id="data-dir"
               readOnly
-              placeholder="C:\Games\Nerevar"
+              placeholder={exampleDataDirPath()}
               value={dataDir}
               onChange={(e) => setDataDir(e.target.value)}
               className="font-mono text-xs bg-input/40"

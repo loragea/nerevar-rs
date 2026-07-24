@@ -268,4 +268,48 @@ mod tests {
             .unwrap()
             .contains("No Linux x86_64 tar.gz asset found for release 123"));
     }
+
+    /// End-to-end check of the real Linux download path: hits the live GitHub
+    /// API, downloads the ~58MB tes3mp-0.8.1 Linux tarball, extracts it, and
+    /// verifies the client/server wrapper scripts land where the process
+    /// manager expects them and are executable. Ignored by default because it
+    /// needs network access and a non-trivial download.
+    #[tokio::test]
+    #[ignore = "network: downloads ~58MB from GitHub"]
+    #[cfg(target_os = "linux")]
+    async fn downloads_and_extracts_linux_release_end_to_end() {
+        use crate::process_manager::spawn::find_executable;
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!(
+            "nerevar-download-e2e-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let releases = get_all_releases().await.expect("failed to fetch releases");
+        let release = releases
+            .iter()
+            .find(|r| r.tag_name == "tes3mp-0.8.1")
+            .expect("tes3mp-0.8.1 release not found");
+
+        download_and_extract_release_zip_by_id_to_path(
+            release.id.to_string(),
+            dir.to_string_lossy().to_string(),
+        )
+        .await
+        .expect("download and extract failed");
+
+        let server_exe = find_executable(&dir, &["tes3mp-server"], 5)
+            .expect("tes3mp-server wrapper not found");
+        let mode = std::fs::metadata(&server_exe)
+            .expect("failed to stat tes3mp-server")
+            .permissions()
+            .mode();
+        assert!(mode & 0o111 != 0, "tes3mp-server is not executable");
+
+        find_executable(&dir, &["tes3mp"], 5).expect("tes3mp client wrapper not found");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
