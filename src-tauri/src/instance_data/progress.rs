@@ -1,8 +1,10 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
 use ts_rs::TS;
+
+use crate::reporter::{emit_event, EventSink};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -38,16 +40,16 @@ pub struct BackgroundOperationProgressEvent {
 }
 
 pub struct ProgressEmitter {
-    app: AppHandle,
+    sink: Arc<dyn EventSink>,
     instance_id: String,
     operation_id: String,
     last_emit: Instant,
 }
 
 impl ProgressEmitter {
-    pub fn new(app: AppHandle, instance_id: String, operation_id: String) -> Self {
+    pub fn new(sink: Arc<dyn EventSink>, instance_id: String, operation_id: String) -> Self {
         Self {
-            app,
+            sink,
             instance_id,
             operation_id,
             last_emit: Instant::now() - Duration::from_secs(1),
@@ -68,9 +70,10 @@ impl ProgressEmitter {
         }
 
         self.last_emit = Instant::now();
-        let _ = self.app.emit(
+        emit_event(
+            &*self.sink,
             "background-operation-progress",
-            BackgroundOperationProgressEvent {
+            &BackgroundOperationProgressEvent {
                 operation_id: self.operation_id.clone(),
                 instance_id: self.instance_id.clone(),
                 phase,
@@ -90,5 +93,54 @@ impl ProgressEmitter {
             return false;
         }
         self.last_emit.elapsed() < Duration::from_millis(100)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reporter::CollectingEventSink;
+
+    #[test]
+    fn emit_forced_sends_events_to_sink() {
+        let sink = Arc::new(CollectingEventSink::default());
+        let mut emitter = ProgressEmitter::new(
+            sink.clone(),
+            "instance-1".to_string(),
+            "operation-1".to_string(),
+        );
+
+        emitter.emit(
+            BackgroundOperationPhase::ScanningPackages,
+            "Scanning packages",
+            0,
+            2,
+            None,
+            true,
+        );
+        emitter.emit(
+            BackgroundOperationPhase::ScanningPackages,
+            "Scanning packages",
+            1,
+            2,
+            Some("mod.esp".to_string()),
+            true,
+        );
+
+        let events = sink.events();
+        assert_eq!(events.len(), 2);
+        for (name, _) in &events {
+            assert_eq!(*name, "background-operation-progress");
+        }
+
+        assert_eq!(events[0].1["instanceId"], "instance-1");
+        assert_eq!(events[0].1["operationId"], "operation-1");
+        assert_eq!(events[0].1["step"], 0);
+        assert_eq!(events[0].1["total"], 2);
+
+        assert_eq!(events[1].1["instanceId"], "instance-1");
+        assert_eq!(events[1].1["operationId"], "operation-1");
+        assert_eq!(events[1].1["step"], 1);
+        assert_eq!(events[1].1["currentItem"], "mod.esp");
     }
 }

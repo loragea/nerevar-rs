@@ -44,7 +44,13 @@ fn progress_emitter(
     instance_id: &str,
     operation_id: Option<String>,
 ) -> Option<ProgressEmitter> {
-    operation_id.map(|id| ProgressEmitter::new(app, instance_id.to_string(), id))
+    operation_id.map(|id| {
+        ProgressEmitter::new(
+            std::sync::Arc::new(crate::reporter::TauriEventSink::new(app)),
+            instance_id.to_string(),
+            id,
+        )
+    })
 }
 
 #[tauri::command]

@@ -37,7 +37,6 @@ pub struct TauriEventSink {
 }
 
 impl TauriEventSink {
-    #[allow(dead_code)] // consumers arrive as call sites migrate module by module
     pub fn new(app: tauri::AppHandle) -> Self {
         Self { app }
     }
