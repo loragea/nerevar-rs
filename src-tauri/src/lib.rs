@@ -68,7 +68,9 @@ async fn download_and_run_nerevar_update(
     app: tauri::AppHandle,
     release_id: u64,
 ) -> Result<(), String> {
-    app_update::download_and_run_installer(release_id, app).await
+    app_update::download_and_run_installer(release_id).await?;
+    app.exit(0);
+    Ok(())
 }
 
 #[tauri::command]

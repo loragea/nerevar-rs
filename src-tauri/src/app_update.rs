@@ -4,7 +4,6 @@ use std::process::Command;
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
 use tauri_plugin_log::log::info;
 #[cfg(not(windows))]
 use tauri_plugin_log::log::error;
@@ -73,7 +72,7 @@ pub async fn check_for_update() -> Result<AppUpdateStatus, String> {
     })
 }
 
-pub async fn download_and_run_installer(release_id: u64, app: AppHandle) -> Result<(), String> {
+pub async fn download_and_run_installer(release_id: u64) -> Result<(), String> {
     let releases = github_getters::get_nerevar_releases().await?;
     let release = releases
         .iter()
@@ -112,7 +111,6 @@ pub async fn download_and_run_installer(release_id: u64, app: AppHandle) -> Resu
         "Launched installer at {} and exiting Nerevar",
         installer_path.display()
     );
-    app.exit(0);
     Ok(())
 }
 
