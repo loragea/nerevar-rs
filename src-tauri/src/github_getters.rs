@@ -1,8 +1,10 @@
-use crate::data::GithubReleaseResponse;
+use crate::data::{GithubAssetResponse, GithubReleaseResponse};
+use flate2::read::GzDecoder;
 use reqwest::Client;
 use std::fs::File;
 use std::io::{copy, Cursor};
 use std::path::Path;
+use tar::Archive;
 use tauri_plugin_log::log::{error, info};
 
 pub async fn get_all_releases() -> Result<Vec<GithubReleaseResponse>, String> {
@@ -70,18 +72,14 @@ pub async fn download_and_extract_release_zip_by_id_to_path(
         .find(|release| release.id == release_id_u64)
         .ok_or_else(|| format!("Release with id {release_id} not found"))?;
 
-    let zip_asset = desired_release
-        .assets
-        .iter()
-        .find(|asset| asset.name.contains("Win64") && asset.name.ends_with(".zip"))
-        .ok_or_else(|| format!("No Windows zip asset found for release {release_id}"))?;
+    let asset = select_tes3mp_asset(&desired_release.assets, &release_id)?;
 
     let dest = Path::new(&path);
     std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
 
     let client = Client::new();
     let bytes = client
-        .get(&zip_asset.browser_download_url)
+        .get(&asset.browser_download_url)
         .header(
             "User-Agent",
             format!("Nerevar-{}", env!("CARGO_PKG_VERSION")),
@@ -93,27 +91,181 @@ pub async fn download_and_extract_release_zip_by_id_to_path(
         .await
         .map_err(|e| e.to_string())?;
 
-    let reader = Cursor::new(bytes);
-    let mut archive = zip::ZipArchive::new(reader).map_err(|e| e.to_string())?;
+    if asset.name.ends_with(".zip") {
+        let reader = Cursor::new(bytes);
+        let mut archive = zip::ZipArchive::new(reader).map_err(|e| e.to_string())?;
 
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
-        let Some(relative_path) = file.enclosed_name() else {
-            continue;
-        };
-        let outpath = dest.join(relative_path);
+        for i in 0..archive.len() {
+            let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+            let Some(relative_path) = file.enclosed_name() else {
+                continue;
+            };
+            let outpath = dest.join(relative_path);
 
-        if file.name().ends_with('/') {
-            std::fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
-        } else {
-            if let Some(parent) = outpath.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            if file.name().ends_with('/') {
+                std::fs::create_dir_all(&outpath).map_err(|e| e.to_string())?;
+            } else {
+                if let Some(parent) = outpath.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+                let mut outfile = File::create(&outpath).map_err(|e| e.to_string())?;
+                copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
             }
-            let mut outfile = File::create(&outpath).map_err(|e| e.to_string())?;
-            copy(&mut file, &mut outfile).map_err(|e| e.to_string())?;
         }
+    } else if asset.name.ends_with(".tar.gz") {
+        let reader = Cursor::new(bytes);
+        let tar = GzDecoder::new(reader);
+        let mut archive = Archive::new(tar);
+        archive.unpack(dest).map_err(|e| e.to_string())?;
+    } else {
+        return Err(format!(
+            "Unsupported asset archive format for asset {}",
+            asset.name
+        ));
     }
 
     info!("Extracted release {release_id} to {}", dest.display());
     Ok(())
+}
+
+/// Picks the release asset appropriate for the current platform.
+///
+/// The selection rules themselves live in `select_windows_asset` and
+/// `select_linux_asset` so they can be unit tested regardless of the host
+/// OS running the tests; only the platform dispatch below is `cfg`-gated.
+#[cfg(windows)]
+fn select_tes3mp_asset<'a>(
+    assets: &'a [GithubAssetResponse],
+    release_id: &str,
+) -> Result<&'a GithubAssetResponse, String> {
+    select_windows_asset(assets, release_id)
+}
+
+#[cfg(target_os = "linux")]
+fn select_tes3mp_asset<'a>(
+    assets: &'a [GithubAssetResponse],
+    release_id: &str,
+) -> Result<&'a GithubAssetResponse, String> {
+    select_linux_asset(assets, release_id)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn select_tes3mp_asset<'a>(
+    _assets: &'a [GithubAssetResponse],
+    release_id: &str,
+) -> Result<&'a GithubAssetResponse, String> {
+    Err(format!(
+        "No supported release asset exists for this platform (release {release_id})"
+    ))
+}
+
+/// Selection rule for Windows: matches the historical behavior of picking
+/// the Win64 zip asset.
+#[allow(dead_code)]
+fn select_windows_asset<'a>(
+    assets: &'a [GithubAssetResponse],
+    release_id: &str,
+) -> Result<&'a GithubAssetResponse, String> {
+    assets
+        .iter()
+        .find(|asset| asset.name.contains("Win64") && asset.name.ends_with(".zip"))
+        .ok_or_else(|| format!("No Windows zip asset found for release {release_id}"))
+}
+
+/// Selection rule for Linux: picks the full client+server x86_64 tarball,
+/// explicitly excluding the server-only tarball and other architectures
+/// (e.g. armv7l).
+#[allow(dead_code)]
+fn select_linux_asset<'a>(
+    assets: &'a [GithubAssetResponse],
+    release_id: &str,
+) -> Result<&'a GithubAssetResponse, String> {
+    assets
+        .iter()
+        .find(|asset| {
+            asset.name.contains("GNU+Linux")
+                && asset.name.contains("x86_64")
+                && asset.name.ends_with(".tar.gz")
+                && !asset.name.starts_with("tes3mp-server")
+        })
+        .ok_or_else(|| {
+            format!("No Linux x86_64 tar.gz asset found for release {release_id}")
+        })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn asset(name: &str) -> GithubAssetResponse {
+        GithubAssetResponse {
+            url: String::new(),
+            id: 0,
+            node_id: String::new(),
+            name: name.to_string(),
+            label: None,
+            content_type: String::new(),
+            state: String::new(),
+            size: 0,
+            download_count: 0,
+            created_at: String::new(),
+            updated_at: String::new(),
+            browser_download_url: String::new(),
+        }
+    }
+
+    fn assets_081() -> Vec<GithubAssetResponse> {
+        vec![
+            asset("tes3mp-GNU+Linux-x86_64-release-0.8.1-68954091c5-6da3fdea59.tar.gz"),
+            asset("tes3mp-server-GNU+Linux-armv7l-release-0.8.1-37a4b2a103-096b6f1687.tar.gz"),
+            asset("tes3mp-server-GNU+Linux-x86_64-release-0.8.1-68954091c5-6da3fdea59.tar.gz"),
+            asset("tes3mp.Win64.release.0.8.1.zip"),
+        ]
+    }
+
+    fn assets_080() -> Vec<GithubAssetResponse> {
+        vec![
+            asset("tes3mp-GNU+Linux-x86_64-release-0.8.0-6b1c83f629-14d7382e1e.tar.gz"),
+            asset("tes3mp-server-GNU+Linux-x86_64-release-0.8.0-6b1c83f629-14d7382e1e.tar.gz"),
+            asset("tes3mp.Win64.release.0.8.0.zip"),
+        ]
+    }
+
+    #[test]
+    fn windows_rule_picks_win64_zip() {
+        let assets = assets_081();
+        let selected = select_windows_asset(&assets, "123").expect("should find asset");
+        assert_eq!(selected.name, "tes3mp.Win64.release.0.8.1.zip");
+    }
+
+    #[test]
+    fn linux_rule_picks_client_tarball_081() {
+        let assets = assets_081();
+        let selected = select_linux_asset(&assets, "123").expect("should find asset");
+        assert_eq!(
+            selected.name,
+            "tes3mp-GNU+Linux-x86_64-release-0.8.1-68954091c5-6da3fdea59.tar.gz"
+        );
+    }
+
+    #[test]
+    fn linux_rule_picks_client_tarball_080() {
+        let assets = assets_080();
+        let selected = select_linux_asset(&assets, "123").expect("should find asset");
+        assert_eq!(
+            selected.name,
+            "tes3mp-GNU+Linux-x86_64-release-0.8.0-6b1c83f629-14d7382e1e.tar.gz"
+        );
+    }
+
+    #[test]
+    fn linux_rule_errors_on_windows_only_assets() {
+        let assets = vec![asset("tes3mp.Win64.release.0.8.1.zip")];
+        let result = select_linux_asset(&assets, "123");
+        assert!(result.is_err());
+        assert!(result
+            .err()
+            .unwrap()
+            .contains("No Linux x86_64 tar.gz asset found for release 123"));
+    }
 }
