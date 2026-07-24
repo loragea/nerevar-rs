@@ -7,11 +7,12 @@ use netstat2::{
 };
 use serde::{Deserialize, Serialize};
 use sysinfo::{Pid, ProcessesToUpdate, System};
-use tauri::{AppHandle, Emitter, State};
+use tauri::State;
 use ts_rs::TS;
 
 use crate::data::NerevarConfig;
 use crate::instance_setup::{instance_tes3mp_dir, read_tes3mp_server_settings};
+use crate::reporter::{emit_event, EventSink};
 use crate::AppState;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS, PartialEq, Eq)]
@@ -196,11 +197,11 @@ pub fn kill_process(pid: u32) -> Result<(), String> {
     Ok(())
 }
 
-pub fn emit_port_conflicts(app: &AppHandle, conflicts: Vec<PortConflict>) {
+pub fn emit_port_conflicts(sink: &dyn EventSink, conflicts: Vec<PortConflict>) {
     if conflicts.is_empty() {
         return;
     }
-    let _ = app.emit("port-conflicts-detected", conflicts);
+    emit_event(sink, "port-conflicts-detected", &conflicts);
 }
 
 #[tauri::command]

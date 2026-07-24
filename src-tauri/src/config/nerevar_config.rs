@@ -62,7 +62,7 @@ pub fn load_or_create_nerevar_config(
 }
 
 pub async fn complete_onboarding(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-    let (sink, app_handle, config, start_sync_server) = {
+    let (sink, config, start_sync_server) = {
         let mut state = state.lock().unwrap();
         let was_complete = state.nerevar_config.onboarding_complete;
         state.nerevar_config.onboarding_complete = true;
@@ -82,12 +82,6 @@ pub async fn complete_onboarding(state: State<'_, Mutex<AppState>>) -> Result<()
                 .event_sink
                 .clone()
                 .ok_or_else(|| "Event sink not initialized".to_string())?,
-            // Only needed for the port_conflict probe below (step 6b still
-            // takes `&AppHandle`); everything else uses `sink`.
-            state
-                .app_handle
-                .clone()
-                .ok_or_else(|| "App handle not initialized".to_string())?,
             state.nerevar_config.clone(),
             !was_complete,
         )
@@ -96,10 +90,10 @@ pub async fn complete_onboarding(state: State<'_, Mutex<AppState>>) -> Result<()
     emit_event(&*sink, "on_config_change", &config);
 
     if start_sync_server {
-        let app = app_handle.clone();
+        let sink = sink.clone();
         tauri::async_runtime::spawn(async move {
             if let Ok(conflicts) = port_conflict::check_startup_conflicts(&config) {
-                port_conflict::emit_port_conflicts(&app, conflicts);
+                port_conflict::emit_port_conflicts(&*sink, conflicts);
             }
         });
     }

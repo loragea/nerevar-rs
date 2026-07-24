@@ -37,10 +37,6 @@ use tokio::sync::watch;
 
 #[derive(Default)]
 struct AppState {
-    // Retained alongside `event_sink` only for the port_conflict startup/
-    // onboarding probe (step 6b of the EventSink migration still takes
-    // `&AppHandle`); every other backend emit goes through `event_sink`.
-    app_handle: Option<tauri::AppHandle>,
     event_sink: Option<Arc<dyn EventSink>>,
     nerevar_config_path: String,
     nerevar_config: NerevarConfig,
@@ -182,11 +178,11 @@ pub fn run() {
                 .unwrap()
                 .nerevar_config = config;
 
-            // Set the app handle (port_conflict probe, step 6b) and the
-            // event sink (everything else) from the same handle.
-            app.state::<Mutex<AppState>>().lock().unwrap().app_handle = Some(app.handle().clone());
-            app.state::<Mutex<AppState>>().lock().unwrap().event_sink =
-                Some(Arc::new(TauriEventSink::new(app.handle().clone())));
+            // Build the sink once and reuse it everywhere below (AppState,
+            // the startup port probe, and the server supervisor) instead of
+            // constructing a fresh TauriEventSink per use.
+            let event_sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.handle().clone()));
+            app.state::<Mutex<AppState>>().lock().unwrap().event_sink = Some(event_sink.clone());
 
             // DISABLED CONFIG WATCHER FOR NOW AS EVEN INTERNAL CHANGES TRIGGER IT AND WILL
             // CAUSE UNECESSARY RE-RENDERS IN REACT
@@ -233,7 +229,6 @@ pub fn run() {
 
             let server_ctx =
                 nerevar_server::state::ServerContext::new(sync_host, manifest_cache);
-            let app_handle = app.handle().clone();
             let startup_config = app
                 .state::<Mutex<AppState>>()
                 .lock()
@@ -242,23 +237,24 @@ pub fn run() {
                 .clone();
 
             if startup_config.onboarding_complete {
+                let sink = event_sink.clone();
                 tauri::async_runtime::spawn(async move {
                     if let Ok(conflicts) =
                         port_conflict::check_startup_conflicts(&startup_config)
                     {
-                        port_conflict::emit_port_conflicts(&app_handle, conflicts);
+                        port_conflict::emit_port_conflicts(&*sink, conflicts);
                     }
                 });
             }
 
-            let app_handle = app.handle().clone();
+            let sink = event_sink.clone();
 
             tauri::async_runtime::spawn(async move {
                 let mut current_task: Option<tauri::async_runtime::JoinHandle<()>>;
 
                 let start = |port: i32,
                              ctx: Arc<nerevar_server::state::ServerContext>,
-                             app: tauri::AppHandle| {
+                             sink: Arc<dyn EventSink>| {
                     tauri::async_runtime::spawn(async move {
                         match nerevar_server::try_bind(port).await {
                             Ok(listener) => {
@@ -281,13 +277,13 @@ pub fn run() {
                                     ) {
                                         Ok(Some(conflict)) => {
                                             port_conflict::emit_port_conflicts(
-                                                &app,
+                                                &*sink,
                                                 vec![conflict],
                                             );
                                         }
                                         Ok(None) => {
                                             port_conflict::emit_port_conflicts(
-                                                &app,
+                                                &*sink,
                                                 vec![PortConflict {
                                                     port: port as u16,
                                                     role: port_conflict::PortRole::NerevarSync,
@@ -319,7 +315,7 @@ pub fn run() {
                         "NEREVAR SERVER: starting on port {port}"
                     );
                     current_task =
-                        Some(start(port, server_ctx.clone(), app_handle.clone()));
+                        Some(start(port, server_ctx.clone(), sink.clone()));
                 } else {
                     tauri_plugin_log::log::info!(
                         "NEREVAR SERVER: waiting for onboarding to complete"
@@ -349,7 +345,7 @@ pub fn run() {
                                 task.abort();
                             }
                             current_task =
-                                Some(start(port, server_ctx.clone(), app_handle.clone()));
+                                Some(start(port, server_ctx.clone(), sink.clone()));
                         }
                         changed = rx.changed() => {
                             if changed.is_err() {
@@ -366,7 +362,7 @@ pub fn run() {
                                 task.abort();
                             }
                             current_task =
-                                Some(start(port, server_ctx.clone(), app_handle.clone()));
+                                Some(start(port, server_ctx.clone(), sink.clone()));
                         }
                         changed = retry_rx.changed() => {
                             if changed.is_err() {
@@ -382,7 +378,7 @@ pub fn run() {
                                 task.abort();
                             }
                             current_task =
-                                Some(start(port, server_ctx.clone(), app_handle.clone()));
+                                Some(start(port, server_ctx.clone(), sink.clone()));
                         }
                     }
                 }
