@@ -85,19 +85,35 @@ function firstValidationMessage(
   return undefined;
 }
 
+/**
+ * Lightweight platform sniffing for path-separator purposes. Under Tauri's
+ * WebKitGTK (Linux) and WebView2 (Windows) webviews, `navigator.userAgent`
+ * reliably includes the host OS token, so we sniff for "Windows" and
+ * default to unix-style ("/") separators otherwise.
+ */
+function isWindowsPlatform(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return navigator.userAgent.includes("Windows");
+}
+
 function buildInstanceRootPath(rootPath: string, instanceName: string): string {
-  const base = rootPath.replace(/\//g, "\\").replace(/\\+$/, "");
+  const windows = isWindowsPlatform();
+  const sep = windows ? "\\" : "/";
+  const base = windows
+    ? rootPath.replace(/\//g, "\\").replace(/\\+$/, "")
+    : rootPath.replace(/\/+$/, "");
   const folder = instanceName
     .trim()
     .replace(/[<>:"/\\|?*]/g, "")
     .trim();
   if (!base) return folder;
   if (!folder) return base;
-  return `${base}\\${folder}`;
+  return `${base}${sep}${folder}`;
 }
 
 function buildInstanceDataDir(rootPath: string, instanceName: string): string {
-  return `${rootPath}\\${instanceName}\\data`;
+  const sep = isWindowsPlatform() ? "\\" : "/";
+  return `${rootPath}${sep}${instanceName}${sep}data`;
 }
 
 export function NewInstancePage() {
