@@ -6,6 +6,7 @@ use tauri::{AppHandle, Emitter, State};
 use crate::data::{InstanceConfig, NerevarConfig};
 use crate::instance_data::{find_instance_by_id, resolve_package_data_dir};
 use crate::process_manager::{ProcessManager, ProcessRole};
+use crate::reporter::{emit_event, EventSink, TauriEventSink};
 use crate::sync_client::SyncCoordinator;
 use crate::sync_host::{SharedHostingManifestCache, SharedSyncHost};
 use crate::AppState;
@@ -24,10 +25,10 @@ fn instance_is_running(
 }
 
 fn clear_hosting_if_needed(
-    app: &AppHandle,
     sync_host: &SharedSyncHost,
     manifest_cache: &SharedHostingManifestCache,
     instance_id: &str,
+    sink: &dyn EventSink,
 ) -> Result<(), String> {
     let mut host = sync_host
         .lock()
@@ -47,7 +48,7 @@ fn clear_hosting_if_needed(
             cache.clear();
         }
 
-        let _ = app.emit("hosting-changed", ());
+        emit_event(sink, "hosting-changed", &());
     }
 
     Ok(())
@@ -131,7 +132,8 @@ pub fn delete_instance(
     }
 
     let _ = coordinator.cancel(&instance_id);
-    clear_hosting_if_needed(&app, sync_host.inner(), manifest_cache.inner(), &instance_id)?;
+    let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.clone()));
+    clear_hosting_if_needed(sync_host.inner(), manifest_cache.inner(), &instance_id, &*sink)?;
 
     if delete_data_directory {
         delete_instance_files(&instance)?;

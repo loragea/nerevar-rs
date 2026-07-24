@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 
 use crate::data::NerevarConfig;
 use crate::instance_data::{
@@ -15,7 +15,7 @@ use crate::sync_client::ping_nerevar_server;
 use crate::AppState;
 
 use super::status::SyncHostStatus;
-use super::{deactivate_hosting, SharedSyncHost};
+use super::{activate_hosting, deactivate_hosting, SharedSyncHost};
 
 fn instance_name(config: &NerevarConfig, instance_id: &str) -> Option<String> {
     find_instance_by_id(config, instance_id).map(|instance| instance.name.clone())
@@ -42,10 +42,6 @@ fn build_status(
         hosting_instance_name,
         manifest_available,
     }
-}
-
-fn emit_hosting_changed(app: &AppHandle) {
-    let _ = app.emit("hosting-changed", ());
 }
 
 #[tauri::command]
@@ -106,19 +102,16 @@ pub fn activate_hosting_instance(
         .map(|settings| settings.password)
         .unwrap_or_default();
 
-    let mut host = sync_host
-        .lock()
-        .map_err(|_| "Sync host lock poisoned".to_string())?;
-    host.hosting_instance_id = Some(instance_id);
-    host.hosting_data_dir = Some(data_dir);
-    host.hosting_instance_root = Some(instance_root);
-    host.hosting_sync_password = Some(sync_password);
-
-    if let Ok(mut cache) = manifest_cache.write() {
-        cache.clear();
-    }
-
-    emit_hosting_changed(&app);
+    let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app));
+    activate_hosting(
+        sync_host.inner(),
+        manifest_cache.inner(),
+        instance_id,
+        data_dir,
+        instance_root,
+        sync_password,
+        sink,
+    )?;
     Ok(manifest)
 }
 

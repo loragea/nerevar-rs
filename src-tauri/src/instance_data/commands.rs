@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 
 use crate::instance_data::{
     build_manifest, delete_package, find_instance_by_id, import_mo2_modlist_from_csv,
@@ -352,18 +352,15 @@ pub async fn set_hosting_instance(
         .map(|settings| settings.password)
         .unwrap_or_default();
 
-    let mut host = sync_host
-        .lock()
-        .map_err(|_| "Sync host lock poisoned".to_string())?;
-    host.hosting_instance_id = Some(instance_id);
-    host.hosting_data_dir = Some(data_dir_for_host);
-    host.hosting_instance_root = Some(instance_root_for_host);
-    host.hosting_sync_password = Some(sync_password);
-
-    if let Ok(mut cache) = manifest_cache.write() {
-        cache.clear();
-    }
-
-    let _ = app_for_host.emit("hosting-changed", ());
+    let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app_for_host));
+    activate_hosting(
+        sync_host.inner(),
+        manifest_cache.inner(),
+        instance_id,
+        data_dir_for_host,
+        instance_root_for_host,
+        sync_password,
+        sink,
+    )?;
     Ok(manifest)
 }
