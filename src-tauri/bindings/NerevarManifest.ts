@@ -4,20 +4,8 @@ import type { ManifestPackage } from "./ManifestPackage";
 import type { RequiredDataFileEntry } from "./RequiredDataFileEntry";
 import type { ResolvedOpenMwConfig } from "./ResolvedOpenMwConfig";
 
-export type NerevarManifest = {
-  version: number;
-  instanceId: string;
-  instanceName: string;
-  generatedAt: string;
-  baseGameData: string | null;
-  packages: Array<ManifestPackage>;
-  resolved: ResolvedOpenMwConfig;
-  totalDownloadBytes: bigint;
-  /**
-   * TES3MP game server port from the host's `tes3mp-server-default.cfg` [General] section.
-   */
-  tes3mpServerPort: number;
-  tes3mpServerPassword?: string;
-  requiredDataFiles: Array<RequiredDataFileEntry>;
-  instanceSettings: InstanceSettings;
-};
+export type NerevarManifest = { version: number, instanceId: string, instanceName: string, generatedAt: string, baseGameData: string | null, packages: Array<ManifestPackage>, resolved: ResolvedOpenMwConfig, totalDownloadBytes: bigint, 
+/**
+ * TES3MP game server port from the host's `tes3mp-server-default.cfg` [General] section.
+ */
+tes3mpServerPort: number, tes3mpServerPassword?: string, requiredDataFiles: Array<RequiredDataFileEntry>, instanceSettings: InstanceSettings, };
