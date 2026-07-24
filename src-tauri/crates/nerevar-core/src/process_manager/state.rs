@@ -261,6 +261,27 @@ impl ProcessManager {
     }
 }
 
+/// Best-effort SIGKILL to the whole process group `pid` leads (spawn.rs sets
+/// `process_group(0)` on every TES3MP child, so `pid` is also its pgid).
+/// Reaches the real ELF binary a wrapper script (tes3mp/tes3mp-server) ran
+/// as a plain child rather than `exec`'d into — see the comment on
+/// `configure_tes3mp_command` in spawn.rs. Shells out to `kill(1)` rather
+/// than a raw `kill(2)` FFI call so this stays dependency-free (`No new
+/// deps in core`, notes/nerevar-host-design.md's Constraints); `kill(1)` is
+/// as ubiquitous on Unix as the shell itself. Errors (missing `kill(1)`,
+/// already-dead group) are swallowed — the direct `child.kill()` right
+/// after this call is still the authoritative, always-available fallback.
+#[cfg(unix)]
+fn kill_process_group(pid: u32) {
+    let _ = std::process::Command::new("kill")
+        .arg("-KILL")
+        .arg(format!("-{pid}"))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
 /// Kill and reap the child held in `child_arc`, if any. `None` means the
 /// slot was already empty (a race with natural exit — the exit watcher
 /// already emitted its own status); `Some(code)` means this call did the
@@ -270,6 +291,8 @@ impl ProcessManager {
 fn kill_and_reap(child_arc: &Arc<Mutex<Option<Child>>>) -> Option<Option<i32>> {
     let mut slot = child_arc.lock().ok()?;
     let mut child = slot.take()?;
+    #[cfg(unix)]
+    kill_process_group(child.id());
     let _ = child.kill();
     Some(child.wait().ok().and_then(|s| s.code()))
 }

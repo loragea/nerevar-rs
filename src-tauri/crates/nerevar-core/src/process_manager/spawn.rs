@@ -47,6 +47,24 @@ fn configure_tes3mp_command(command: &mut Command, working_dir: &Path) {
         use std::os::windows::process::CommandExt;
         command.creation_flags(CREATE_NO_WINDOW);
     }
+
+    // TES3MP's Linux tarball executables (tes3mp, tes3mp-server) are wrapper
+    // scripts that set LD_LIBRARY_PATH then run the real ELF binary as a
+    // *plain foreground command*, not `exec` — so it stays a genuine child
+    // process rather than replacing the wrapper's PID. `Child::kill()` only
+    // signals the one pid we hold (the wrapper); killing just that leaves
+    // the real binary running, reparented to init, still holding the game
+    // port (confirmed empirically: killing the wrapper's pid does not stop
+    // `tes3mp-server.x86_64`). Put the child in its own new process group so
+    // `kill_process_group` (state.rs) can signal wrapper + real binary
+    // together — a non-interactive script's background command inherits its
+    // parent's process group unless something changes it, so both land in
+    // this new group.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
 }
 
 pub fn find_executable(root: &Path, names: &[&str], max_depth: u32) -> Option<PathBuf> {
