@@ -2820,6 +2820,7 @@ dependencies = [
  "encoding_rs",
  "flate2",
  "log",
+ "nerevar-core",
  "netstat2",
  "rayon",
  "reqwest",

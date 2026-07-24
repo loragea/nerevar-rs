@@ -32,3 +32,13 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 urlencoding = "2.1.3"
 csv = "1.3"
 uuid = { version = "1.23.1", features = ["v4"] }
+
+[dev-dependencies]
+# Self-dev-dep: enables this crate's own `test-util` feature (gates
+# `reporter::CollectingEventSink`) for its `tests/` integration binaries.
+# `cfg(test)` alone only covers unit tests compiled inside the crate;
+# `tests/sync_roundtrip.rs` is a separate crate that links nerevar-core as a
+# normal dependency, so it only sees `CollectingEventSink` if the feature is
+# active on that build. Mirrors the same pattern in ../../Cargo.toml (the
+# app crate depending on core with test-util enabled).
+nerevar-core = { path = ".", features = ["test-util"] }

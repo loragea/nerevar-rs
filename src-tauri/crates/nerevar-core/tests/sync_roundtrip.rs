@@ -5,13 +5,14 @@
 //! the manifest and downloads every file back, verifying checksums — using the same
 //! non-Tauri functions the Tauri commands call.
 //!
-//! Why this lives inside the crate (a `#[cfg(test)] mod`) rather than in `tests/`:
-//! the crate is a lib+bin, but every module in `lib.rs` is private (`mod x;`, not
-//! `pub mod`). An integration test in `tests/` only sees the public API, which here is
-//! effectively empty (`run()`). All of the plumbing — `nerevar_server::{try_bind,
-//! serve}`, `ServerContext`, `SyncHostState`, `sync_client::fetch::*`,
-//! `instance_data::*` — is crate-private, so it is only reachable from a module
-//! compiled as part of the crate.
+//! Lives in `nerevar-core/tests/` as a real integration test: every module it needs
+//! (`nerevar_server`, `sync_client`, `sync_host`, `instance_data`, `sync_auth`,
+//! `reporter`) is `pub mod` on `nerevar-core`, so it only reaches the crate's public
+//! API — same as any other consumer, including the future `nerevar-host` daemon.
+//! `CollectingEventSink` is reachable here because it's gated
+//! `cfg(any(test, feature = "test-util"))`; this crate's own `[dev-dependencies]`
+//! enable `test-util` on itself so integration-test binaries can see it too (`cfg(test)`
+//! alone only covers unit tests compiled inside the crate, not this external binary).
 //!
 //! COVERED as of the EventSink migration: the parallel download engine
 //! (`sync_client/download.rs::download_manifest_files`) — the 16-worker pool, checksum
@@ -31,17 +32,17 @@ use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use crate::instance_data::{
+use nerevar_core::instance_data::{
     build_manifest, file_checksum, load_load_order, manifest_path, package_abs_path,
     scan_and_merge_load_order,
 };
-use crate::nerevar_server::state::ServerContext;
-use crate::nerevar_server::{serve, try_bind};
-use crate::reporter::CollectingEventSink;
-use crate::sync_auth::SYNC_PASSWORD_HEADER;
-use crate::sync_client::download::{download_manifest_files, DownloadOutcome};
-use crate::sync_client::{fetch_full_manifest, fetch_manifest_summary};
-use crate::sync_host::{new_shared_hosting_manifest_cache, new_shared_sync_host};
+use nerevar_core::nerevar_server::state::ServerContext;
+use nerevar_core::nerevar_server::{serve, try_bind};
+use nerevar_core::reporter::CollectingEventSink;
+use nerevar_core::sync_auth::SYNC_PASSWORD_HEADER;
+use nerevar_core::sync_client::download::{download_manifest_files, DownloadOutcome};
+use nerevar_core::sync_client::{fetch_full_manifest, fetch_manifest_summary};
+use nerevar_core::sync_host::{new_shared_hosting_manifest_cache, new_shared_sync_host};
 
 /// Sync password used to exercise the auth path end to end. Distinct from the (empty)
 /// TES3MP server password so the two concepts stay clearly separated.

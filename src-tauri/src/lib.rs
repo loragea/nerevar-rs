@@ -18,17 +18,16 @@ mod sync_host;
 pub(crate) use nerevar_core::data;
 pub(crate) use nerevar_core::github_getters;
 pub(crate) use nerevar_core::instance_setup;
-// `sync_auth`'s only remaining app-side consumer is `sync_roundtrip_test.rs`
+// `sync_auth`'s only remaining app-side consumer was `sync_roundtrip_test.rs`
 // (`#[cfg(test)]`): its production call sites (`nerevar_server`, `sync_client`) moved into
-// core in this same step (mid-layer split, step 6), so this shim is now test-only — gated
-// to avoid an unused-import warning on non-test builds. `sync_paths` has no remaining
-// app-side consumer at all (same reason) and its step-5 shim is dropped outright.
+// core in the mid-layer split (step 6), and the test itself relocated into
+// `nerevar-core/tests/sync_roundtrip.rs` (step 8), so this shim has no consumers left and
+// is dropped. `sync_paths` has no remaining app-side consumer at all (same reason) and its
+// step-5 shim is dropped outright.
 // `openmw_ini_importer`'s only remaining app-side consumers
 // (`validate_global_openmw_config`/`generate_default_global_openmw_config`) moved into
 // core's `config::nerevar_config` in the top-layer split (step 7), so this shim is now
 // unused and dropped outright too — same reasoning as `sync_paths`.
-#[cfg(test)]
-pub(crate) use nerevar_core::sync_auth;
 
 // nerevar-core module shims (mid-layer split, step 6): `process_manager` and
 // `nerevar_server` moved wholesale (no app-side command residue — process launching has
@@ -52,9 +51,6 @@ pub(crate) use nerevar_core::process_manager;
 // of its core-side module.
 pub(crate) use nerevar_core::supervisor;
 pub(crate) use nerevar_core::AppState;
-
-#[cfg(test)]
-mod sync_roundtrip_test;
 
 use crate::data::GithubReleaseResponse;
 use crate::data::NerevarConfig;
