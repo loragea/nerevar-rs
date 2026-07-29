@@ -35,6 +35,13 @@ pub struct Cli {
     #[arg(long)]
     pub scan: bool,
 
+    /// Host the manifest.json already on disk instead of rebuilding it from
+    /// load-order.json at startup. Faster restarts, but the manifest — and
+    /// TES3MP's required-plugin list — can then disagree with what is on
+    /// disk.
+    #[arg(long)]
+    pub no_manifest_rebuild: bool,
+
     /// Resolve config + instance, validate paths, print a summary, and
     /// exit 0/1 without starting any servers.
     #[arg(long)]

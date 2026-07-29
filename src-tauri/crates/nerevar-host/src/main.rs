@@ -61,6 +61,18 @@ async fn run(cli: Cli) -> Result<i32, String> {
         return Ok(if ok { 0 } else { 1 });
     }
 
+    // Rebuild the manifest before hosting, exactly like the GUI's
+    // set_hosting_instance: activating hosting without this served whatever
+    // manifest happened to be on disk — and 404s when nothing ever built one,
+    // which on a GUI-less host is the normal case.
+    let hosted = manifest::prepare(
+        &instance_id,
+        &instance_name,
+        &instance_root,
+        &data_dir,
+        !cli.no_manifest_rebuild,
+    )?;
+
     // Same pattern as the GUI's `save_and_host_instance`: best-effort read,
     // empty password if the server cfg can't be parsed rather than a hard
     // failure (sync hosting can still come up; only the TES3MP launch below
@@ -68,6 +80,20 @@ async fn run(cli: Cli) -> Result<i32, String> {
     let sync_password = read_tes3mp_server_settings(&instance_tes3mp_dir(&instance_root))
         .map(|settings| settings.password)
         .unwrap_or_default();
+
+    // Clients dial the game port the manifest carries (read from the
+    // instance's tes3mp-server-default.cfg). config.json's copy is the GUI's
+    // cache of it; when they disagree the cfg wins, so say so rather than let
+    // an admin trust the wrong number.
+    if let Some(configured) = instance.tes3mp_server_port {
+        if configured != hosted.tes3mp_server_port {
+            log::warn!(
+                "config.json records TES3MP game port {configured} for this instance, but its \
+                 tes3mp-server-default.cfg says {port} — clients follow the cfg ({port})",
+                port = hosted.tes3mp_server_port
+            );
+        }
+    }
 
     let sync_host = new_shared_sync_host();
     let manifest_cache = new_shared_hosting_manifest_cache();
@@ -116,7 +142,10 @@ async fn run(cli: Cli) -> Result<i32, String> {
             &instance_root,
             &data_dir,
         )?;
-        log::info!("TES3MP dedicated server launched for instance \"{instance_name}\"");
+        log::info!(
+            "TES3MP dedicated server launched for instance \"{instance_name}\" on port {}",
+            hosted.tes3mp_server_port
+        );
     }
 
     signal::wait_for_shutdown_signal().await;
