@@ -2,6 +2,7 @@ mod check;
 mod cli;
 mod config;
 mod instance;
+mod manifest;
 mod signal;
 mod sink;
 
@@ -45,15 +46,20 @@ async fn run(cli: Cli) -> Result<i32, String> {
     let instance = instance::select_owned_instance(&resolved.config, cli.instance.as_deref())?;
     let sync_port = cli.port.unwrap_or(resolved.config.sync_port);
 
-    if cli.check {
-        let ok = check::run_check(&resolved, instance, sync_port);
-        return Ok(if ok { 0 } else { 1 });
-    }
-
     let instance_id = instance.id.clone();
     let instance_name = instance.name.clone();
     let instance_root = Path::new(&instance.path).to_path_buf();
     let data_dir = resolve_package_data_dir(instance);
+
+    // Before --check, so `--scan --check` previews the scanned result.
+    if cli.scan {
+        manifest::scan_data_dir(&data_dir)?;
+    }
+
+    if cli.check {
+        let ok = check::run_check(&resolved, instance, sync_port);
+        return Ok(if ok { 0 } else { 1 });
+    }
 
     // Same pattern as the GUI's `save_and_host_instance`: best-effort read,
     // empty password if the server cfg can't be parsed rather than a hard
