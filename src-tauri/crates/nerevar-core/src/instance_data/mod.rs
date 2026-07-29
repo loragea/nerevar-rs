@@ -28,7 +28,7 @@ pub use progress::{
 };
 pub use paths::{
     ensure_instance_data_layout, launch_cfg_dir, launch_cfg_path, launch_settings_overlay_path,
-    manifest_path, nerevar_dir, package_abs_path, resolve_package_data_dir,
+    load_order_path, manifest_path, nerevar_dir, package_abs_path, resolve_package_data_dir,
 };
 pub use prune::prune_local_against_manifest;
 // Test-only: expose the manifest's file-checksum helper to `sync_roundtrip_test`, which
