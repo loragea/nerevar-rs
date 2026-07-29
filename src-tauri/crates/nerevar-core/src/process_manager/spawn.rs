@@ -245,7 +245,10 @@ pub fn launch_tes3mp_server(
     instance_root: &Path,
     data_dir: &Path,
 ) -> Result<(), String> {
-    let (launch_cfg, _launch_settings) = prepare_launch_cfg(data_dir)?;
+    // Called for its side effect only: it writes the launch cfg that
+    // `resolve_instance_openmw_config` reads back on the next line. The
+    // dedicated server never reads openmw.cfg itself, so the paths go unused.
+    let (_launch_cfg, _launch_settings) = prepare_launch_cfg(data_dir)?;
     let tes3mp_dir = instance_tes3mp_dir(instance_root);
     let resolved = resolve_instance_openmw_config(data_dir)?;
     write_required_data_files_for_resolved(&tes3mp_dir, &resolved)?;

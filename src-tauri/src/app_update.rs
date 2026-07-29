@@ -1,5 +1,8 @@
 use std::cmp::Ordering;
 use std::path::PathBuf;
+// Only the Windows installer path spawns a process (see
+// `spawn_installer_detached`); elsewhere in-app updates are refused outright.
+#[cfg(windows)]
 use std::process::Command;
 
 use reqwest::Client;
@@ -185,6 +188,9 @@ fn version_compare(left: &str, right: &str) -> Ordering {
     }
 }
 
+// `path` is Windows-only by construction: the not(windows) arm refuses the
+// operation outright, so a Linux/macOS build sees it as unused.
+#[cfg_attr(not(windows), allow(unused_variables))]
 fn spawn_installer_detached(path: &PathBuf) -> Result<(), String> {
     #[cfg(windows)]
     {

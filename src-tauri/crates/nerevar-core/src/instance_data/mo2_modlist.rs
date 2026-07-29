@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::types::{LoadOrder, LoadOrderEntry, PluginEntry};
+use super::types::{LoadOrder, LoadOrderEntry};
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -295,6 +295,7 @@ fn parse_optional_u32(value: &str) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::types::PluginEntry;
     use super::*;
     use crate::instance_data::types::{LoadOrderEntry, PackageKind, LOAD_ORDER_VERSION};
 
