@@ -99,27 +99,31 @@ async fn sync_if_needed_inner(
     );
     let remote = fetch_full_manifest(host, port, sync_password).await?;
 
+    // Read the local manifest once and pass it around: the deltas below, the
+    // already-up-to-date early return, and `finalize_after_sync` all want the
+    // same bytes, and it can be large.
     let local_manifest = if manifest_path(data_dir).exists() {
         Some(load_manifest(data_dir)?)
     } else {
         None
     };
 
-    let needs_download = if force {
-        true
-    } else if !manifest_path(data_dir).exists() {
-        true
-    } else {
-        let local = load_manifest(data_dir)?;
-        if manifests_differ(&local, &remote) {
-            true
-        } else {
-            let state = load_sync_state(data_dir, &remote)?;
-            !sync_is_complete(&state, &remote)
+    let needs_download = match (force, local_manifest.as_ref()) {
+        (true, _) => true,
+        (false, None) => true,
+        (false, Some(local)) => {
+            if manifests_differ(local, &remote) {
+                true
+            } else {
+                let state = load_sync_state(data_dir, &remote)?;
+                !sync_is_complete(&state, &remote)
+            }
         }
     };
 
-    if !needs_download {
+    if let (false, Some(local)) = (needs_download, local_manifest.as_ref()) {
+        // `needs_download == false` implies a local manifest exists (see the
+        // match above), so this arm is the only reachable "nothing to do" path.
         emit_sync_progress(
             &*sink,
             instance_id,
@@ -131,8 +135,7 @@ async fn sync_if_needed_inner(
             0,
             None,
         );
-        let local = load_manifest(data_dir)?;
-        finalize_after_sync(instance, data_dir, &local)?;
+        finalize_after_sync(instance, data_dir, local)?;
         return Ok(ManifestValidationResult {
             valid: true,
             issues: Vec::new(),

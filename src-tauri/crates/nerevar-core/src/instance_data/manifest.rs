@@ -17,9 +17,7 @@ use crate::instance_setup::{
     build_required_data_files, instance_tes3mp_dir, read_tes3mp_server_settings,
     write_required_data_files,
 };
-use crate::instance_settings::{
-    apply_instance_settings_to_disk, load_instance_settings, write_launch_settings_overlay,
-};
+use crate::instance_settings::{apply_instance_settings_to_disk, load_instance_settings};
 
 struct PackageWorkItem {
     index: usize,
