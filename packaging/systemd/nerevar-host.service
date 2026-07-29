@@ -1,0 +1,64 @@
+# Example systemd unit for the headless Nerevar host daemon.
+#
+# Install:
+#   sudo install -m 0644 nerevar-host.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now nerevar-host
+#
+# Adjust User/Group, the paths in ExecStart/ReadWritePaths, and --instance if
+# the config holds more than one owned instance. Full walkthrough (creating the
+# service user, the instance layout, the config file, day-2 operations):
+# docs/headless-hosting.md.
+
+[Unit]
+Description=Nerevar headless TES3MP host
+Documentation=https://github.com/kyaustad/nerevar-rs/blob/main/docs/headless-hosting.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nerevar
+Group=nerevar
+
+# Fail fast and loudly on a broken config or a missing mod list, before any
+# port is bound. Prints the same summary you get from running --check by hand.
+ExecStartPre=/usr/local/bin/nerevar-host --config /etc/nerevar/config.json --check
+ExecStart=/usr/local/bin/nerevar-host --config /etc/nerevar/config.json
+
+# The daemon logs to stderr; journald captures it. `journalctl -u nerevar-host
+# -f` then shows both Nerevar's own lines and the TES3MP server's output.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nerevar-host
+Environment=RUST_LOG=info
+
+# Exit 0 = asked to stop (SIGTERM). Exit 1 = startup/config failure. Exit 69 =
+# the TES3MP dedicated server died on its own, and the daemon shut sync hosting
+# down with it rather than sit there looking healthy — restarting is exactly
+# what we want.
+Restart=on-failure
+RestartSec=5s
+
+# Shutdown: the daemon kills the TES3MP process group and waits for the game
+# port to be released before exiting. KillMode=control-group (the default) is
+# the backstop that reaps anything it somehow missed.
+TimeoutStopSec=30
+
+# Filesystem: the daemon writes inside the instance tree (manifest, TES3MP's
+# requiredDataFiles.json, server config.lua, world/player saves) but never
+# writes its config file. Point ReadWritePaths at wherever the instances live.
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/nerevar
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

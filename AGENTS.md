@@ -12,7 +12,7 @@ Tauri 2 application, three parts:
 
 - `src/` — React + TypeScript frontend (Vite, Tailwind, pnpm). Thin UI layer;
   it mostly invokes Tauri commands and renders state.
-- `src-tauri/` — a Cargo workspace with two crates:
+- `src-tauri/` — a Cargo workspace with three crates:
   - `crates/nerevar-core` (`nerevar-core`) — the Tauri-free engine: instance
     management (`instance_data/`, `instance_setup/`, `instance_settings/`),
     host/client sync (`sync_host/`, `sync_client/`, `sync_paths.rs`,
@@ -20,7 +20,7 @@ Tauri 2 application, three parts:
     management (`process_manager/`), config (`config/`), GitHub release
     downloads (`github_getters.rs`), and the supervisor that wires them
     together (`supervisor.rs`, `app_state.rs`). No Tauri dependency, so it's
-    reusable by non-GUI frontends (a future headless `nerevar-host` daemon).
+    reusable by non-GUI frontends — which is what `nerevar-host` is.
     Its `test-util` feature gates test-only helpers (e.g.
     `reporter::CollectingEventSink`) for use from integration tests in
     `crates/nerevar-core/tests/`.
@@ -28,6 +28,13 @@ Tauri 2 application, three parts:
     handlers, app/window wiring, GUI-only glue that must stay off of core
     (`file_actions.rs` for native file dialogs, `mo2_plugin.rs`,
     `app_update.rs` for self-update, `TauriEventSink`).
+  - `crates/nerevar-host` (`nerevar-host`) — headless daemon: hosts one owned
+    instance (manifest rebuild, sync server, TES3MP dedicated server) with no
+    GUI, for dedicated Linux servers. Depends only on `nerevar-core` plus
+    clap/env_logger/tokio; it must never gain a Tauri dependency, and core
+    must never gain a clap one. Operator-facing docs (instance layout without
+    the GUI, systemd, day-2 mod updates): `docs/headless-hosting.md` and
+    `packaging/systemd/nerevar-host.service`.
 
 Command handlers registered in `src-tauri/src/lib.rs` are the frontend/backend
 boundary; most just resolve Tauri state and call straight into `nerevar-core`.
@@ -41,9 +48,15 @@ repo root (see below) — not `src-tauri/bindings/`, which no longer exists.
 - `pnpm tauri build` — release build.
 - `pnpm dev` / `pnpm build` — frontend only.
 - `pnpm typecheck` — TypeScript check; `pnpm format` — Prettier.
-- `cargo check` / `cargo test` inside `src-tauri/` for backend-only work —
-  this covers the whole workspace (`nerevar` + `nerevar-core`), including
-  `nerevar-core`'s integration tests under `crates/nerevar-core/tests/`.
+- `cargo check --workspace` / `cargo test --workspace` inside `src-tauri/` for
+  backend-only work. **Pass `--workspace`**: `src-tauri/` is both the workspace
+  root and the `nerevar` package, so a bare `cargo test` runs only that
+  package's five tests — it silently skips `nerevar-core`'s ~100 tests, its
+  integration tests under `crates/nerevar-core/tests/`, and all of
+  `nerevar-host` (which nothing depends on, so a bare `cargo check` never even
+  compiles it).
+- `cargo build --release -p nerevar-host` — just the headless daemon; needs no
+  Node/Tauri toolchain, which is the point on a server.
 
 Rust stable toolchain; frontend uses pnpm (not npm/yarn).
 
