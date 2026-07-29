@@ -38,6 +38,7 @@ Nerevar is a desktop companion for [TES3MP](https://tes3mp.com/) that keeps ever
 - [Why Nerevar exists](#why-nerevar-exists)
 - [How it works](#how-it-works)
 - [For server owners](#for-server-owners)
+- [Headless hosting](#headless-hosting)
 - [For players joining a server](#for-players-joining-a-server)
 - [First-time setup](#first-time-setup)
 - [Dashboard and instances](#dashboard-and-instances)
@@ -105,6 +106,28 @@ You do not need to understand manifests, HTTP, or OpenMW cfg files to use Nereva
 When you change mods, save and host again. Players pick up deltas on their next sync or launch.
 
 You can also **launch the client from the same owned instance** to connect to your own server locally — Nerevar keeps client and server configs aligned.
+
+---
+
+## Headless hosting
+
+A dedicated server usually has no desktop. `nerevar-host` is a small daemon that
+hosts one owned instance without the app: it rebuilds the instance's manifest,
+serves it and the mod files to Nerevar clients, and runs the TES3MP dedicated
+server — the same `nerevar-core` code paths the app uses, the same config file
+and manifest format.
+
+```bash
+cd src-tauri && cargo build --release -p nerevar-host
+nerevar-host --config /etc/nerevar/config.json --check   # what would be hosted?
+nerevar-host --config /etc/nerevar/config.json           # host it
+```
+
+It runs in the foreground and logs to stderr, so a service manager owns it; an
+example systemd unit ships in
+[`packaging/systemd/nerevar-host.service`](packaging/systemd/nerevar-host.service).
+Setting up an instance by hand (layout, config file, load order, mod updates,
+ports) is covered in **[docs/headless-hosting.md](docs/headless-hosting.md)**.
 
 ---
 
