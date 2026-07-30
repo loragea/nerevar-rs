@@ -65,7 +65,7 @@ pub fn build_manifest(
     let server_settings = read_tes3mp_server_settings(&instance_tes3mp_dir(instance_root))?;
     let instance_settings = load_instance_settings(data_dir)?;
     apply_instance_settings_to_disk(instance_root, data_dir, &instance_settings)?;
-    let required_data_files = build_required_data_files(&resolved)?;
+    let required_data_files = build_required_data_files(&resolved, &instance_tes3mp_dir(instance_root))?;
     write_required_data_files(
         &instance_tes3mp_dir(instance_root),
         &required_data_files,
