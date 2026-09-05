@@ -57,6 +57,14 @@ repo root (see below) — not `src-tauri/bindings/`, which no longer exists.
   compiles it).
 - `cargo build --release -p nerevar-host` — just the headless daemon; needs no
   Node/Tauri toolchain, which is the point on a server.
+- `cargo run -p nerevar-core --example sync_client -- --config <config.json>
+  --instance <id> [--force] [--launch]` — headless client-side sync (and
+  optional TES3MP client launch) for one synced instance, through the same
+  core calls the app's sync/launch commands make. Prints core events as JSON
+  lines; the doc comment at the top of
+  `crates/nerevar-core/examples/sync_client.rs` has the details. It is what a
+  test rig drives instead of the GUI, and a fallback for a Linux user with no
+  desktop. `cargo test --workspace` compiles it, so it cannot rot.
 
 Rust stable toolchain; frontend uses pnpm (not npm/yarn).
 
