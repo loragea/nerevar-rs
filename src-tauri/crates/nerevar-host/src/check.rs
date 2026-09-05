@@ -5,7 +5,7 @@ use nerevar_core::instance_data::{
     load_load_order, load_manifest, load_order_path, manifest_path, resolve_package_data_dir,
 };
 use nerevar_core::instance_setup::instance_tes3mp_dir;
-use nerevar_core::process_manager::find_tes3mp_server_exe;
+use nerevar_core::runtime::inspect;
 
 use crate::config::ResolvedConfig;
 
@@ -13,7 +13,7 @@ use crate::config::ResolvedConfig;
 /// prints a summary, without starting any servers. Returns `true` when the
 /// instance is actually hostable.
 ///
-/// The TES3MP exe is reported but doesn't by itself fail the check, since
+/// The TES3MP runtime is reported but doesn't by itself fail the check, since
 /// `--sync-only` runs never need it. A missing load order *does* fail: a run
 /// would refuse to guess a mod list, and a client hitting a manifest-less host
 /// gets 404s rather than an empty-but-valid sync.
@@ -21,7 +21,7 @@ pub fn run_check(resolved: &ResolvedConfig, instance: &InstanceConfig, sync_port
     let instance_root = Path::new(&instance.path);
     let data_dir = resolve_package_data_dir(instance);
     let tes3mp_dir = instance_tes3mp_dir(instance_root);
-    let exe = find_tes3mp_server_exe(&tes3mp_dir);
+    let runtime = inspect(&tes3mp_dir);
 
     println!("nerevar-host --check");
     println!("  config path:    {}", resolved.path.display());
@@ -29,9 +29,26 @@ pub fn run_check(resolved: &ResolvedConfig, instance: &InstanceConfig, sync_port
     println!("  instance root:  {}", instance_root.display());
     println!("  data dir:       {}", data_dir.display());
     println!("  sync port:      {sync_port}");
-    match &exe {
-        Some(path) => println!("  tes3mp server:  found ({})", path.display()),
-        None => println!("  tes3mp server:  not found under {}", tes3mp_dir.display()),
+    match &runtime {
+        Ok(info) => {
+            println!(
+                "  tes3mp runtime: OpenMW {} at {}",
+                info.version_display(),
+                tes3mp_dir.display()
+            );
+            match &info.server_exe {
+                Some(path) => println!("  tes3mp server:  found ({})", path.display()),
+                None => println!("  tes3mp server:  not found under {}", tes3mp_dir.display()),
+            }
+            let missing = info.missing_required();
+            if !missing.is_empty() {
+                println!("  runtime gaps:   missing {}", missing.join(", "));
+            }
+            for warning in &info.warnings {
+                println!("  runtime note:   {warning}");
+            }
+        }
+        Err(err) => println!("  tes3mp runtime: {err}"),
     }
 
     let root_ok = instance_root.is_dir();

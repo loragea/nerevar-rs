@@ -20,7 +20,7 @@ use super::types::ProcessRole;
 // Order matters: within a directory, the first matching name wins. Linux tarball
 // wrapper scripts (which set LD_LIBRARY_PATH before exec'ing the real binary) must
 // be preferred over the raw .x86_64 ELF binaries they wrap.
-const CLIENT_EXE_NAMES: &[&str] = &[
+pub(crate) const CLIENT_EXE_NAMES: &[&str] = &[
     "tes3mp.exe",
     "openmw.exe",
     "tes3mp",
@@ -28,7 +28,7 @@ const CLIENT_EXE_NAMES: &[&str] = &[
     "tes3mp.x86_64",
     "openmw.x86_64",
 ];
-const SERVER_EXE_NAMES: &[&str] = &["tes3mp-server.exe", "tes3mp-server", "tes3mp-server.x86_64"];
+pub(crate) const SERVER_EXE_NAMES: &[&str] = &["tes3mp-server.exe", "tes3mp-server", "tes3mp-server.x86_64"];
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;

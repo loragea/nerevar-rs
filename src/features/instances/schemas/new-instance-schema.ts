@@ -1,7 +1,11 @@
 import { z } from "zod";
+import {
+  emptyRuntimeSource,
+  runtimeSourceSchema,
+} from "@/features/instances/schemas/runtime-source-schema";
 
 export const newInstanceSchema = z.object({
-  releaseId: z.string().min(1, "Select a TES3MP release"),
+  runtime: runtimeSourceSchema,
   instanceName: z
     .string()
     .trim()
@@ -34,7 +38,7 @@ export const newInstanceSchema = z.object({
 export type NewInstanceFormValues = z.infer<typeof newInstanceSchema>;
 
 export const newInstanceDefaultValues: NewInstanceFormValues = {
-  releaseId: "",
+  runtime: { ...emptyRuntimeSource },
   instanceName: "",
   instanceDescription: "",
   instanceRootPath: "",

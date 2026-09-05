@@ -54,7 +54,7 @@ pub fn apply_server_defaults(
     Ok(())
 }
 
-fn find_server_defaults_cfg(tes3mp_dir: &Path) -> Result<PathBuf, String> {
+pub(crate) fn find_server_defaults_cfg(tes3mp_dir: &Path) -> Result<PathBuf, String> {
     let direct = tes3mp_dir.join(SERVER_DEFAULTS_CFG);
     if direct.is_file() {
         return Ok(direct);
@@ -353,7 +353,7 @@ pub fn write_tes3mp_client_connection(
     Ok(cfg_path)
 }
 
-fn find_client_defaults_cfg(tes3mp_dir: &Path) -> Result<PathBuf, String> {
+pub(crate) fn find_client_defaults_cfg(tes3mp_dir: &Path) -> Result<PathBuf, String> {
     let direct = tes3mp_dir.join(CLIENT_DEFAULTS_CFG);
     if direct.is_file() {
         return Ok(direct);
@@ -431,7 +431,7 @@ enabled = false
 "#;
 
         let settings = NewInstanceConfig {
-            release_id: "1".to_string(),
+            runtime: crate::runtime::RuntimeSource::from_legacy_release_id("1"),
             instance_name: "test".to_string(),
             instance_description: String::new(),
             instance_root_path: String::new(),
@@ -473,7 +473,7 @@ rate = 10000
 "#;
 
         let settings = NewInstanceConfig {
-            release_id: "1".to_string(),
+            runtime: crate::runtime::RuntimeSource::from_legacy_release_id("1"),
             instance_name: "test".to_string(),
             instance_description: String::new(),
             instance_root_path: String::new(),

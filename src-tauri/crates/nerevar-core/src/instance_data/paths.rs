@@ -93,6 +93,7 @@ mod tests {
             path: path.to_string_lossy().into_owned(),
             data_dir: data_dir.to_string_lossy().into_owned(),
             release_id: None,
+            runtime: None,
             remote_host: None,
             remote_sync_port: None,
             last_synced_at: None,

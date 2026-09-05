@@ -1,7 +1,11 @@
 import { z } from "zod";
+import {
+  emptyRuntimeSource,
+  runtimeSourceSchema,
+} from "@/features/instances/schemas/runtime-source-schema";
 
 export const newConnectionSchema = z.object({
-  releaseId: z.string().min(1, "Select a TES3MP release"),
+  runtime: runtimeSourceSchema,
   connectionName: z
     .string()
     .trim()
@@ -28,7 +32,7 @@ export const newConnectionSchema = z.object({
 export type NewConnectionFormValues = z.infer<typeof newConnectionSchema>;
 
 export const newConnectionDefaultValues: NewConnectionFormValues = {
-  releaseId: "",
+  runtime: { ...emptyRuntimeSource },
   connectionName: "",
   connectionDescription: "",
   instanceRootPath: "",
