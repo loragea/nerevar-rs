@@ -38,7 +38,7 @@ pub async fn ping_nerevar_server(host: &str, port: u16) -> Result<(), String> {
     let url = format!("{}/ping", base_url(host, port));
     let response = client
         .get(&url)
-        .header("User-Agent", "Nerevar-0.1.0")
+        .header("User-Agent", crate::USER_AGENT)
         .send()
         .await
         .map_err(|e| connection_error("Failed to reach Nerevar server", host, port, e))?;
@@ -62,7 +62,7 @@ pub async fn fetch_manifest_summary(
     let request = apply_sync_password(
         client
             .get(&url)
-            .header("User-Agent", "Nerevar-0.1.0"),
+            .header("User-Agent", crate::USER_AGENT),
         sync_password,
     );
     let response = request
@@ -102,7 +102,7 @@ pub async fn fetch_full_manifest(
     let request = apply_sync_password(
         client
             .get(&url)
-            .header("User-Agent", "Nerevar-0.1.0"),
+            .header("User-Agent", crate::USER_AGENT),
         sync_password,
     );
     let response = request

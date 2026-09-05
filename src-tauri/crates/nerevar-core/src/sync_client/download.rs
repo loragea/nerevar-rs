@@ -25,10 +25,6 @@ const MAX_CONCURRENT_DOWNLOADS: usize = 16;
 const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(250);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
-fn user_agent() -> String {
-    format!("Nerevar-{}", env!("CARGO_PKG_VERSION"))
-}
-
 fn sync_download_client() -> Result<Client, String> {
     Client::builder()
         .pool_max_idle_per_host(MAX_CONCURRENT_DOWNLOADS)
@@ -209,7 +205,7 @@ async fn download_one_file(
         return Err("Sync cancelled".to_string());
     }
 
-    let mut request = client.get(&job.url).header("User-Agent", user_agent());
+    let mut request = client.get(&job.url).header("User-Agent", crate::USER_AGENT);
     if let Some(password) = sync_password.filter(|value| !value.is_empty()) {
         request = request.header(SYNC_PASSWORD_HEADER, password);
     }

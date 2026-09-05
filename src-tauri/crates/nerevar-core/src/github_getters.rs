@@ -38,11 +38,10 @@ pub(crate) async fn fetch_github_releases(
     info!("Attempting to fetch all {label} releases from GitHub...");
     let client = Client::new();
     let url = format!("https://api.github.com/repos/{repo}/releases");
-    let user_agent = format!("Nerevar-{}", env!("CARGO_PKG_VERSION"));
 
     let response = match client
         .get(url)
-        .header("User-Agent", user_agent)
+        .header("User-Agent", crate::USER_AGENT)
         .send()
         .await
     {
