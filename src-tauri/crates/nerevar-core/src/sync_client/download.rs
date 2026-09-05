@@ -135,10 +135,6 @@ fn part_path(dest: &Path) -> PathBuf {
     ))
 }
 
-fn count_verified_bytes(manifest: &NerevarManifest, completed: &std::collections::HashMap<String, String>) -> u64 {
-    count_verified_in_manifest(manifest, completed).0
-}
-
 fn manifest_file_count(manifest: &NerevarManifest) -> u64 {
     manifest
         .packages
@@ -377,11 +373,11 @@ pub async fn download_manifest_files(
 
     let completed = state.completed_snapshot();
     let jobs = collect_download_jobs(data_dir, manifest, host, port, force, &completed)?;
-    let skipped_bytes = count_verified_bytes(manifest, &completed);
+    // `count_verified_in_manifest` returns (bytes, files) — keep both from the one call so
+    // the two counters can never be swapped again.
+    let (skipped_bytes, files_already_verified) = count_verified_in_manifest(manifest, &completed);
     let bytes_done = Arc::new(AtomicU64::new(skipped_bytes));
     let files_done = Arc::new(AtomicU64::new(0));
-    let (verified_files, _) = count_verified_in_manifest(manifest, &completed);
-    let files_already_verified = verified_files;
     emit_sync_progress(
         &*sink,
         instance_id,
