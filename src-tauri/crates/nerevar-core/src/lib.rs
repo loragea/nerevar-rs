@@ -1,9 +1,19 @@
 //! `nerevar-core`: the Tauri-free heart of Nerevar.
 //!
 //! Holds instance, sync, and process-management logic shared by the Tauri
-//! desktop app and (eventually) a headless `nerevar-host` daemon. Modules
-//! land here incrementally — see the PM plan doc's migration sequence for
-//! what has moved so far and what's still app-side.
+//! desktop app and the headless `nerevar-host` daemon. See AGENTS.md's
+//! "Architecture" section for what lives in which crate.
+
+/// `User-Agent` for every outbound HTTP request Nerevar makes — the GitHub
+/// releases API, runtime asset downloads, and the sync client's calls to a
+/// host. GitHub's API rejects requests without one, and a host operator
+/// reading access logs should be able to tell Nerevar traffic apart.
+///
+/// The version is `nerevar-core`'s own (`src-tauri/crates/nerevar-core/
+/// Cargo.toml`), which is versioned independently of the `nerevar` desktop
+/// app: every HTTP caller lives in this crate, so this is the version that
+/// describes the code sending the request.
+pub const USER_AGENT: &str = concat!("Nerevar-", env!("CARGO_PKG_VERSION"));
 
 pub mod app_state;
 pub mod config;

@@ -63,7 +63,8 @@ pub fn resolve_and_load_config(explicit: Option<&Path>) -> Result<ResolvedConfig
     Err(format!(
         "No config file found. Tried: {}. The daemon never creates config \
          automatically — run the GUI once, or write one of these paths by hand \
-         (see notes/nerevar-host-design.md), or pass --config <path>.",
+         (see docs/headless-hosting.md, \"The Nerevar config file\"), or pass \
+         --config <path>.",
         tried
             .iter()
             .map(|p| p.display().to_string())

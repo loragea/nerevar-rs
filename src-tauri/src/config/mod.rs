@@ -1,5 +1,5 @@
-//! App-side config residue (top-layer split, step 7, see
-//! notes/core-split-plan.md): the plain config logic (load/persist,
+//! App-side config residue after the Tauri/core split (see AGENTS.md,
+//! "Architecture"): the plain config logic (load/persist,
 //! add/update instance, `build_instance_config`/`build_synced_instance_config`,
 //! `start_sync_server_supervisor`, ...) moved into
 //! `nerevar_core::config::nerevar_config`, re-exported below so every

@@ -104,8 +104,8 @@ fn remove_instance_from_config(
     Err(format!("Instance not found: {instance_id}"))
 }
 
-/// Top-layer split (step 7, see notes/core-split-plan.md): everything except
-/// the `#[tauri::command]` signature itself moved here. The app-side residue
+/// Moved here by the Tauri/core split (see AGENTS.md, "Architecture"):
+/// everything except the `#[tauri::command]` signature itself. The app-side residue
 /// (`src-tauri/src/connection/instance_delete.rs`) resolves its
 /// `State`/`AppHandle` arguments into the plain references and an
 /// `Arc<dyn EventSink>` this fn takes, then delegates entirely — same split

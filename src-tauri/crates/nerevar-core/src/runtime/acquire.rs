@@ -513,10 +513,7 @@ async fn stream_asset_to_file(
     let client = Client::new();
     let mut response = client
         .get(url)
-        .header(
-            "User-Agent",
-            format!("Nerevar-{}", env!("CARGO_PKG_VERSION")),
-        )
+        .header("User-Agent", crate::USER_AGENT)
         .send()
         .await
         .map_err(|e| format!("Failed to download {asset_name}: {e}"))?;

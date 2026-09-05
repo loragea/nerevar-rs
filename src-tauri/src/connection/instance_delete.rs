@@ -9,8 +9,8 @@ use crate::sync_client::SyncCoordinator;
 use crate::sync_host::{SharedHostingManifestCache, SharedSyncHost};
 use crate::AppState;
 
-/// Top-layer split (step 7, see notes/core-split-plan.md): all logic moved
-/// into `nerevar_core::connection::instance_delete::delete_instance`. This
+/// Command residue after the Tauri/core split (see AGENTS.md,
+/// "Architecture"): all logic moved into `nerevar_core::connection::instance_delete::delete_instance`. This
 /// residue just resolves Tauri's `State`/`AppHandle` wrappers into the plain
 /// references and `Arc<dyn EventSink>` the core fn takes.
 #[tauri::command]

@@ -282,8 +282,8 @@ impl ProcessManager {
 /// Reaches the real ELF binary a wrapper script (tes3mp/tes3mp-server) ran
 /// as a plain child rather than `exec`'d into — see the comment on
 /// `configure_tes3mp_command` in spawn.rs. Shells out to `kill(1)` rather
-/// than a raw `kill(2)` FFI call so this stays dependency-free (`No new
-/// deps in core`, notes/nerevar-host-design.md's Constraints); `kill(1)` is
+/// than a raw `kill(2)` FFI call so this stays dependency-free — core takes
+/// no new crate just to send a signal; `kill(1)` is
 /// as ubiquitous on Unix as the shell itself. Errors (missing `kill(1)`,
 /// already-dead group) are swallowed — the direct `child.kill()` right
 /// after this call is still the authoritative, always-available fallback.

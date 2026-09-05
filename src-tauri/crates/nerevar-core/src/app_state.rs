@@ -2,8 +2,8 @@
 //! watch-channel senders that drive the sync-server supervisor (see
 //! `supervisor.rs`).
 //!
-//! Top-layer split (step 7, see notes/core-split-plan.md): moved into
-//! nerevar-core wholesale. The app crate's `lib.rs` still `app.manage`s
+//! Moved into nerevar-core wholesale by the Tauri/core split (see
+//! AGENTS.md, "Architecture"). The app crate's `lib.rs` still `app.manage`s
 //! this behind `Mutex<AppState>` so `State<'_, Mutex<AppState>>` in
 //! commands keeps working (via a `pub(crate) use nerevar_core::AppState`
 //! shim). Fields are `pub` (widened from `pub(crate)`): this type is now a

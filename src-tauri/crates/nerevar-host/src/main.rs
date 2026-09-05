@@ -45,8 +45,9 @@ const SERVER_WATCH_INTERVAL: Duration = Duration::from_secs(1);
 async fn main() {
     let cli = Cli::parse();
 
-    // Default `info`; `RUST_LOG` overrides (per notes/nerevar-host-design.md
-    // — log level via env, no --verbose/-q flag).
+    // Default `info`; `RUST_LOG` overrides. Log level is set by the
+    // environment on purpose: no --verbose/-q flag to keep the CLI small and
+    // the systemd unit unchanged when an operator wants more detail.
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     match run(cli).await {
