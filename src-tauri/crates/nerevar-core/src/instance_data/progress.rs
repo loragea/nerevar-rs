@@ -22,6 +22,9 @@ pub enum BackgroundOperationPhase {
     HashingFiles,
     WritingManifest,
     WritingLaunchCfg,
+    DownloadingRuntime,
+    ExtractingRuntime,
+    InspectingRuntime,
     Complete,
 }
 
@@ -88,7 +91,10 @@ impl ProgressEmitter {
     fn should_throttle(&self, phase: BackgroundOperationPhase) -> bool {
         if !matches!(
             phase,
-            BackgroundOperationPhase::HashingFiles | BackgroundOperationPhase::ScanningPackages
+            BackgroundOperationPhase::HashingFiles
+                | BackgroundOperationPhase::ScanningPackages
+                | BackgroundOperationPhase::DownloadingRuntime
+                | BackgroundOperationPhase::ExtractingRuntime
         ) {
             return false;
         }

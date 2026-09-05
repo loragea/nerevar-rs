@@ -71,3 +71,104 @@ pub fn resolve_and_load_config(explicit: Option<&Path>) -> Result<ResolvedConfig
             .join(", ")
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nerevar_core::runtime::{RuntimeSource, DEFAULT_TES3MP_REPO};
+
+    struct Scratch(PathBuf);
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn scratch(label: &str) -> Scratch {
+        let dir = std::env::temp_dir().join(format!(
+            "nerevar-host-config-{label}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        Scratch(dir)
+    }
+
+    /// The daemon reads the same `config.json` the GUI writes, including ones
+    /// written before `runtime` existed: an old file must still load, and its
+    /// instance must come back with the migrated runtime source rather than
+    /// failing to parse.
+    #[test]
+    fn an_old_style_config_still_loads_and_gains_a_runtime_source() {
+        let scratch = scratch("legacy");
+        let path = scratch.0.join("config.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "onboardingComplete": true,
+              "ownedInstances": [
+                {
+                  "id": "host-1",
+                  "name": "Host",
+                  "description": "",
+                  "path": "/instances/host",
+                  "dataDir": "/instances/host/data",
+                  "releaseId": "65767406"
+                }
+              ],
+              "syncedInstances": null,
+              "rootPath": "/instances",
+              "syncPort": 25567
+            }"#,
+        )
+        .unwrap();
+
+        let resolved = resolve_and_load_config(Some(&path)).expect("config should load");
+        assert_eq!(resolved.path, path);
+
+        let owned = resolved.config.owned_instances.expect("owned instances");
+        assert_eq!(owned.len(), 1);
+        assert_eq!(
+            owned[0].runtime,
+            Some(RuntimeSource::GithubRelease {
+                repo: DEFAULT_TES3MP_REPO.to_string(),
+                release_id: "65767406".to_string(),
+                tag: String::new(),
+                asset_name: String::new(),
+            })
+        );
+    }
+
+    /// A hand-written host config (no `releaseId`, no `runtime`) loads too —
+    /// the daemon never installs a runtime, it only reads the one on disk.
+    #[test]
+    fn a_config_with_no_runtime_information_loads_unchanged() {
+        let scratch = scratch("bare");
+        let path = scratch.0.join("config.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "onboardingComplete": true,
+              "ownedInstances": [
+                {
+                  "id": "host-1",
+                  "name": "Host",
+                  "description": "",
+                  "path": "/instances/host",
+                  "dataDir": "/instances/host/data"
+                }
+              ],
+              "syncedInstances": null,
+              "rootPath": "/instances",
+              "syncPort": 25567
+            }"#,
+        )
+        .unwrap();
+
+        let resolved = resolve_and_load_config(Some(&path)).expect("config should load");
+        let owned = resolved.config.owned_instances.expect("owned instances");
+        assert!(owned[0].runtime.is_none());
+        assert!(owned[0].release_id.is_none());
+    }
+}

@@ -3,10 +3,10 @@ use std::sync::{Arc, Mutex};
 
 use crate::data::{InstanceConfig, NerevarConfig, NewConnectionConfig, NewInstanceConfig};
 use crate::port_conflict;
-use crate::github_getters;
 use crate::instance_data::ensure_instance_data_layout;
 use crate::instance_setup::{apply_server_defaults, create_instance_data_dir, instance_tes3mp_dir};
 use crate::reporter::{emit_event, EventSink};
+use crate::runtime::{self, RuntimeSource, TargetPlatform};
 use crate::AppState;
 use log::info;
 use uuid::Uuid;
@@ -64,7 +64,33 @@ pub fn load_or_create_nerevar_config_at(config_path: &Path) -> Result<NerevarCon
 
     let contents = std::fs::read_to_string(config_path).map_err(|e| e.to_string())?;
     info!("Loading config file from {}", config_path.display());
-    serde_json::from_str(&contents).map_err(|e| e.to_string())
+    let mut config: NerevarConfig = serde_json::from_str(&contents).map_err(|e| e.to_string())?;
+    migrate_runtime_sources(&mut config);
+    Ok(config)
+}
+
+/// Fills in `InstanceConfig::runtime` for instances written before the field
+/// existed. Everything such an instance recorded is a `tes3mp/tes3mp`
+/// release id — the tag and asset it was installed from were never stored,
+/// so they migrate as empty. Nothing is written back: the migration is
+/// applied on every load, and the field only lands on disk the next time
+/// something saves the config.
+fn migrate_runtime_sources(config: &mut NerevarConfig) {
+    let instances = config
+        .owned_instances
+        .iter_mut()
+        .chain(config.synced_instances.iter_mut())
+        .flat_map(|list| list.iter_mut());
+
+    for instance in instances {
+        if instance.runtime.is_some() {
+            continue;
+        }
+        let Some(release_id) = instance.release_id.as_deref() else {
+            continue;
+        };
+        instance.runtime = Some(RuntimeSource::from_legacy_release_id(release_id));
+    }
 }
 
 /// Read-only counterpart to `load_or_create_nerevar_config_at`: parses an
@@ -79,7 +105,9 @@ pub fn load_nerevar_config_at(config_path: &Path) -> Result<NerevarConfig, Strin
     }
     let contents = std::fs::read_to_string(config_path).map_err(|e| e.to_string())?;
     info!("Loading config file from {}", config_path.display());
-    serde_json::from_str(&contents).map_err(|e| e.to_string())
+    let mut config: NerevarConfig = serde_json::from_str(&contents).map_err(|e| e.to_string())?;
+    migrate_runtime_sources(&mut config);
+    Ok(config)
 }
 
 pub fn load_or_create_nerevar_config(
@@ -212,7 +240,8 @@ fn build_instance_config(new_instance: &NewInstanceConfig) -> InstanceConfig {
         description: new_instance.instance_description.clone(),
         path: new_instance.instance_root_path.clone(),
         data_dir: new_instance.instance_data_dir.clone(),
-        release_id: Some(new_instance.release_id.clone()),
+        release_id: new_instance.runtime.legacy_release_id(),
+        runtime: Some(new_instance.runtime.clone()),
         remote_host: None,
         remote_sync_port: None,
         last_synced_at: None,
@@ -228,7 +257,8 @@ pub fn build_synced_instance_config(new_connection: &NewConnectionConfig) -> Ins
         description: new_connection.connection_description.clone(),
         path: new_connection.instance_root_path.clone(),
         data_dir: new_connection.instance_data_dir.clone(),
-        release_id: Some(new_connection.release_id.clone()),
+        release_id: new_connection.runtime.legacy_release_id(),
+        runtime: Some(new_connection.runtime.clone()),
         remote_host: Some(new_connection.remote_host.clone()),
         remote_sync_port: Some(new_connection.remote_sync_port),
         last_synced_at: None,
@@ -374,6 +404,18 @@ pub async fn add_instance(
         ));
     }
 
+    // Resolved up front rather than after the download: the runtime install
+    // reports its progress through it.
+    let sink = {
+        let guard = state
+            .lock()
+            .map_err(|_| "App state lock poisoned".to_string())?;
+        guard
+            .event_sink
+            .clone()
+            .ok_or_else(|| "Event sink not initialized".to_string())?
+    };
+
     // Filesystem setup first; only persist config after success.
     if let Err(err) = (async {
         std::fs::create_dir_all(instance_root).map_err(|e| e.to_string())?;
@@ -384,11 +426,14 @@ pub async fn add_instance(
         let tes3mp_dir = instance_tes3mp_dir(instance_root);
         std::fs::create_dir_all(&tes3mp_dir).map_err(|e| e.to_string())?;
 
-        github_getters::download_and_extract_release_zip_by_id_to_path(
-            new_instance.release_id.clone(),
-            tes3mp_dir.to_string_lossy().into_owned(),
+        let installed = runtime::acquire(
+            &new_instance.runtime,
+            &tes3mp_dir,
+            TargetPlatform::current(),
+            sink.clone(),
         )
         .await?;
+        installed.require_complete()?;
 
         apply_server_defaults(&tes3mp_dir, &new_instance)?;
 
@@ -460,4 +505,191 @@ pub async fn generate_default_global_openmw_config(
     crate::openmw_ini_importer::setup_nerevar_openmw_scaffold(Path::new(
         &morrowind_installation_path,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::DEFAULT_TES3MP_REPO;
+
+    struct Scratch(PathBuf);
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn scratch(label: &str) -> Scratch {
+        let dir = std::env::temp_dir().join(format!(
+            "nerevar-config-{label}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        Scratch(dir)
+    }
+
+    /// A config.json exactly as builds before `runtime` wrote it.
+    const LEGACY_CONFIG: &str = r#"{
+      "onboardingComplete": true,
+      "ownedInstances": [
+        {
+          "id": "owned-1",
+          "name": "Owned",
+          "description": "",
+          "path": "/instances/owned",
+          "dataDir": "/instances/owned/data",
+          "releaseId": "65767406"
+        }
+      ],
+      "syncedInstances": [
+        {
+          "id": "synced-1",
+          "name": "Synced",
+          "description": "",
+          "path": "/instances/synced",
+          "dataDir": "/instances/synced/data",
+          "releaseId": "65767406",
+          "remoteHost": "example.invalid",
+          "remoteSyncPort": 25567
+        }
+      ],
+      "rootPath": "/instances",
+      "syncPort": 25567
+    }"#;
+
+    fn legacy_source() -> RuntimeSource {
+        RuntimeSource::GithubRelease {
+            repo: DEFAULT_TES3MP_REPO.to_string(),
+            release_id: "65767406".to_string(),
+            tag: String::new(),
+            asset_name: String::new(),
+        }
+    }
+
+    #[test]
+    fn legacy_release_id_becomes_a_runtime_source_on_load() {
+        let scratch = scratch("legacy");
+        let path = scratch.0.join("config.json");
+        std::fs::write(&path, LEGACY_CONFIG).unwrap();
+
+        let config = load_nerevar_config_at(&path).expect("legacy config should load");
+
+        let owned = &config.owned_instances.as_ref().unwrap()[0];
+        assert_eq!(owned.release_id.as_deref(), Some("65767406"));
+        assert_eq!(owned.runtime.as_ref(), Some(&legacy_source()));
+
+        let synced = &config.synced_instances.as_ref().unwrap()[0];
+        assert_eq!(synced.runtime.as_ref(), Some(&legacy_source()));
+
+        // The same migration on the create-if-missing path.
+        let created = load_or_create_nerevar_config_at(&path).expect("load");
+        assert_eq!(
+            created.owned_instances.as_ref().unwrap()[0].runtime.as_ref(),
+            Some(&legacy_source())
+        );
+    }
+
+    #[test]
+    fn an_explicit_runtime_survives_a_load_untouched() {
+        let scratch = scratch("explicit");
+        let path = scratch.0.join("config.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "onboardingComplete": true,
+              "ownedInstances": [
+                {
+                  "id": "owned-1",
+                  "name": "Owned",
+                  "description": "",
+                  "path": "/instances/owned",
+                  "dataDir": "/instances/owned/data",
+                  "releaseId": "1",
+                  "runtime": {
+                    "kind": "githubRelease",
+                    "repo": "someone/tes3mp",
+                    "releaseId": "999",
+                    "tag": "v1.2.3",
+                    "assetName": "tes3mp.Win64.zip"
+                  }
+                }
+              ],
+              "syncedInstances": null,
+              "rootPath": "/instances",
+              "syncPort": 25567
+            }"#,
+        )
+        .unwrap();
+
+        let config = load_nerevar_config_at(&path).expect("config should load");
+        let owned = &config.owned_instances.as_ref().unwrap()[0];
+        assert_eq!(
+            owned.runtime,
+            Some(RuntimeSource::GithubRelease {
+                repo: "someone/tes3mp".to_string(),
+                release_id: "999".to_string(),
+                tag: "v1.2.3".to_string(),
+                asset_name: "tes3mp.Win64.zip".to_string(),
+            })
+        );
+    }
+
+    /// An instance that never had a release id (host-side configs written by
+    /// hand, see docs/headless-hosting.md) stays runtime-less rather than
+    /// gaining an invented one.
+    #[test]
+    fn an_instance_with_no_release_id_gets_no_runtime() {
+        let scratch = scratch("no-release-id");
+        let path = scratch.0.join("config.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "onboardingComplete": true,
+              "ownedInstances": [
+                {
+                  "id": "owned-1",
+                  "name": "Owned",
+                  "description": "",
+                  "path": "/instances/owned",
+                  "dataDir": "/instances/owned/data"
+                }
+              ],
+              "syncedInstances": null,
+              "rootPath": "/instances",
+              "syncPort": 25567
+            }"#,
+        )
+        .unwrap();
+
+        let config = load_nerevar_config_at(&path).expect("config should load");
+        assert!(config.owned_instances.as_ref().unwrap()[0].runtime.is_none());
+    }
+
+    /// A config this build writes keeps the legacy `releaseId` alongside the
+    /// new `runtime`, so an older Nerevar still finds what it looks for.
+    #[test]
+    fn a_new_instance_records_both_the_runtime_and_the_legacy_release_id() {
+        let new_instance = NewInstanceConfig {
+            runtime: legacy_source(),
+            instance_name: "Owned".to_string(),
+            instance_description: String::new(),
+            instance_root_path: "/instances/owned".to_string(),
+            instance_data_dir: "/instances/owned/data".to_string(),
+            server_host_name: "A Nerevar Server".to_string(),
+            max_players: 64,
+            server_port: 25565,
+            password: String::new(),
+            master_server_enabled: true,
+        };
+
+        let instance = build_instance_config(&new_instance);
+        assert_eq!(instance.release_id.as_deref(), Some("65767406"));
+        assert_eq!(instance.runtime.as_ref(), Some(&legacy_source()));
+
+        let json = serde_json::to_value(&instance).unwrap();
+        assert_eq!(json["releaseId"], "65767406");
+        assert_eq!(json["runtime"]["kind"], "githubRelease");
+    }
 }

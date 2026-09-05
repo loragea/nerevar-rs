@@ -89,7 +89,7 @@ pub fn write_required_data_files(
     tes3mp_dir: &Path,
     entries: &[RequiredDataFileEntry],
 ) -> Result<PathBuf, String> {
-    let data_dir = tes3mp_server_data_dir(tes3mp_dir)?;
+    let data_dir = find_tes3mp_server_data_dir(tes3mp_dir)?;
     std::fs::create_dir_all(&data_dir)
         .map_err(|e| format!("Failed to create {}: {e}", data_dir.display()))?;
 
@@ -138,7 +138,7 @@ fn runtime_loads_builtin_omwscripts(tes3mp_dir: &Path) -> bool {
 }
 
 /// `(major, minor)` from the first line of the install's `resources/version`.
-fn openmw_runtime_version(tes3mp_dir: &Path) -> Option<(u32, u32)> {
+pub(crate) fn openmw_runtime_version(tes3mp_dir: &Path) -> Option<(u32, u32)> {
     let path = find_relative_file(tes3mp_dir, VERSION_FILE, 6)?;
     let contents = std::fs::read_to_string(path).ok()?;
     parse_openmw_version(&contents)
@@ -200,7 +200,7 @@ fn find_builtin_omwscripts(dir: &Path, max_depth: u32) -> bool {
     false
 }
 
-fn tes3mp_server_data_dir(tes3mp_dir: &Path) -> Result<PathBuf, String> {
+pub(crate) fn find_tes3mp_server_data_dir(tes3mp_dir: &Path) -> Result<PathBuf, String> {
     let direct = tes3mp_dir.join(SERVER_DATA_SUBDIR);
     if direct.is_dir() {
         return Ok(direct);

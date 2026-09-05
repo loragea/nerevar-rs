@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::runtime::RuntimeSource;
+
 #[derive(TS, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -10,8 +12,18 @@ pub struct InstanceConfig {
     pub description: String,
     pub path: String,
     pub data_dir: String,
+    /// Legacy: the `tes3mp/tes3mp` release id an instance was installed
+    /// from, written by builds that predate `runtime`. Still written
+    /// alongside `runtime` for `githubRelease` sources so a config this
+    /// build writes stays readable by those builds; `runtime` is what is
+    /// read. `load_nerevar_config_at` fills `runtime` from this field when
+    /// it is absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_id: Option<String>,
+    /// Where this instance's TES3MP runtime came from. Absent only in
+    /// configs written before the field existed, which the loader migrates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<RuntimeSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_host: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -54,7 +66,7 @@ pub struct InstanceConnectionSettings {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct NewConnectionConfig {
-    pub release_id: String,
+    pub runtime: RuntimeSource,
     pub connection_name: String,
     pub connection_description: String,
     pub instance_root_path: String,
@@ -68,7 +80,7 @@ pub struct NewConnectionConfig {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct NewInstanceConfig {
-    pub release_id: String,
+    pub runtime: RuntimeSource,
     pub instance_name: String,
     pub instance_description: String,
     pub instance_root_path: String,

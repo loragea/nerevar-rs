@@ -17,8 +17,10 @@ Tauri 2 application, three parts:
     management (`instance_data/`, `instance_setup/`, `instance_settings/`),
     host/client sync (`sync_host/`, `sync_client/`, `sync_paths.rs`,
     `sync_auth.rs`), the embedded HTTP server (`nerevar_server/`), process
-    management (`process_manager/`), config (`config/`), GitHub release
-    downloads (`github_getters.rs`), and the supervisor that wires them
+    management (`process_manager/`), config (`config/`), the client-pulled
+    TES3MP runtime (`runtime/`: where it comes from, installing it,
+    inspecting an install) over the GitHub releases API
+    (`github_getters.rs`), and the supervisor that wires them
     together (`supervisor.rs`, `app_state.rs`). No Tauri dependency, so it's
     reusable by non-GUI frontends — which is what `nerevar-host` is.
     Its `test-util` feature gates test-only helpers (e.g.

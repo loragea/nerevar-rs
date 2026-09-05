@@ -112,7 +112,7 @@ export function NewConnectionPage() {
     setCreating(true);
     try {
       const payload: NewConnectionConfig = {
-        releaseId: values.releaseId,
+        runtime: values.runtime,
         connectionName: values.connectionName,
         connectionDescription: values.connectionDescription,
         instanceRootPath: values.instanceRootPath,
@@ -181,7 +181,7 @@ export function NewConnectionPage() {
               <FieldLabel className={SECTION_LABEL}>TES3MP release</FieldLabel>
               <Controller
                 control={form.control}
-                name="releaseId"
+                name="runtime"
                 render={({ field, fieldState }) => (
                   <>
                     <ReleaseSelector

@@ -757,6 +757,7 @@ async fn sync_if_needed_reports_already_up_to_date_on_the_second_call() {
         path: instance_root.to_string_lossy().into_owned(),
         data_dir: instance_data.to_string_lossy().into_owned(),
         release_id: None,
+        runtime: None,
         remote_host: Some("127.0.0.1".to_string()),
         remote_sync_port: Some(harness.port),
         last_synced_at: None,

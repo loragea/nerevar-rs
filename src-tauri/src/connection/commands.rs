@@ -17,12 +17,12 @@ use crate::instance_setup::{
     write_tes3mp_client_connection,
 };
 use crate::instance_data::ensure_instance_data_layout;
-use crate::github_getters;
 use crate::process_manager::{
     launch_tes3mp_client, launch_tes3mp_server, stop_tes3mp_process, GlobalProcessStatus,
     ProcessManager, ProcessRole,
 };
 use crate::reporter::{emit_event, EventSink, TauriEventSink};
+use nerevar_core::runtime::{self, TargetPlatform};
 use crate::sync_client::{
     fetch_manifest_summary, ping_nerevar_server, run_instance_sync, sync_if_needed,
     touch_last_synced, write_synced_client_connection, RemoteManifestSummary, SyncCoordinator,
@@ -72,6 +72,18 @@ pub async fn add_synced_connection(
     )
     .await?;
 
+    // Resolved up front rather than after the download: the runtime install
+    // reports its progress through it.
+    let runtime_sink = {
+        let guard = state
+            .lock()
+            .map_err(|_| "App state lock poisoned".to_string())?;
+        guard
+            .event_sink
+            .clone()
+            .ok_or_else(|| "Event sink not initialized".to_string())?
+    };
+
     if let Err(err) = (async {
         std::fs::create_dir_all(instance_root).map_err(|e| e.to_string())?;
         let instance_data_dir = Path::new(&new_connection.instance_data_dir);
@@ -81,11 +93,14 @@ pub async fn add_synced_connection(
         let tes3mp_dir = instance_tes3mp_dir(instance_root);
         std::fs::create_dir_all(&tes3mp_dir).map_err(|e| e.to_string())?;
 
-        github_getters::download_and_extract_release_zip_by_id_to_path(
-            new_connection.release_id.clone(),
-            tes3mp_dir.to_string_lossy().into_owned(),
+        let installed = runtime::acquire(
+            &new_connection.runtime,
+            &tes3mp_dir,
+            TargetPlatform::current(),
+            runtime_sink.clone(),
         )
         .await?;
+        installed.require_complete()?;
 
         write_tes3mp_client_connection(
             &tes3mp_dir,

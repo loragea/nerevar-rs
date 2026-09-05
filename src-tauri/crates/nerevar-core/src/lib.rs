@@ -18,6 +18,7 @@ pub mod openmw_ini_importer;
 pub mod port_conflict;
 pub mod process_manager;
 pub mod reporter;
+pub mod runtime;
 pub mod supervisor;
 pub mod sync_auth;
 pub mod sync_client;

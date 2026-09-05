@@ -160,7 +160,7 @@ export function NewInstancePage() {
     try {
       await invoke<void>("add_instance", {
         newInstance: {
-          releaseId: data.releaseId,
+          runtime: data.runtime,
           instanceName: data.instanceName,
           instanceDescription: data.instanceDescription,
           instanceRootPath: data.instanceRootPath,
@@ -211,7 +211,7 @@ export function NewInstancePage() {
             className="flex flex-col"
           >
             <Controller
-              name="releaseId"
+              name="runtime"
               control={form.control}
               render={({ field, fieldState }) => (
                 <InstanceFormField
