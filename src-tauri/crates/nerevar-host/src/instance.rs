@@ -61,6 +61,7 @@ mod tests {
             data_dir: String::new(),
             release_id: None,
             runtime: None,
+            runtime_hint: None,
             remote_host: None,
             remote_sync_port: None,
             last_synced_at: None,

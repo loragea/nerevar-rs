@@ -66,8 +66,12 @@ use tauri::State;
 use tokio::sync::watch;
 
 #[tauri::command]
-async fn get_all_releases() -> Result<Vec<GithubReleaseResponse>, String> {
-    github_getters::get_all_releases()
+/// Lists a TES3MP repository's GitHub releases for the runtime picker.
+///
+/// `repo` is what the picker's repository field holds; omitting it (an older
+/// caller, or the field left at its default) lists the official repository.
+async fn get_all_releases(repo: Option<String>) -> Result<Vec<GithubReleaseResponse>, String> {
+    github_getters::get_all_releases(repo.as_deref())
         .await
         .map_err(|e| e.to_string())
 }
@@ -340,6 +344,7 @@ pub fn run() {
             connection::commands::get_global_process_status,
             connection::instance_edit::get_instance_connection_settings,
             connection::instance_edit::update_instance,
+            connection::instance_edit::set_instance_runtime_hint,
             connection::instance_delete::delete_instance,
             port_conflict::check_port_conflicts,
             port_conflict::kill_port_process,

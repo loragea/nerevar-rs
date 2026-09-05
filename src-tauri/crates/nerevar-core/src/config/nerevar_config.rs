@@ -242,6 +242,7 @@ fn build_instance_config(new_instance: &NewInstanceConfig) -> InstanceConfig {
         data_dir: new_instance.instance_data_dir.clone(),
         release_id: new_instance.runtime.legacy_release_id(),
         runtime: Some(new_instance.runtime.clone()),
+        runtime_hint: None,
         remote_host: None,
         remote_sync_port: None,
         last_synced_at: None,
@@ -259,6 +260,7 @@ pub fn build_synced_instance_config(new_connection: &NewConnectionConfig) -> Ins
         data_dir: new_connection.instance_data_dir.clone(),
         release_id: new_connection.runtime.legacy_release_id(),
         runtime: Some(new_connection.runtime.clone()),
+        runtime_hint: None,
         remote_host: Some(new_connection.remote_host.clone()),
         remote_sync_port: Some(new_connection.remote_sync_port),
         last_synced_at: None,
@@ -673,6 +675,53 @@ mod tests {
 
         let config = load_nerevar_config_at(&path).expect("config should load");
         assert!(config.owned_instances.as_ref().unwrap()[0].runtime.is_none());
+    }
+
+    /// A host operator's suggestion survives a load, and an instance without
+    /// one comes back with `None` — the shape of every config written before
+    /// the field existed.
+    #[test]
+    fn a_runtime_hint_round_trips_through_the_config_file() {
+        let scratch = scratch("hint");
+        let path = scratch.0.join("config.json");
+        std::fs::write(&path, LEGACY_CONFIG).unwrap();
+
+        let mut config = load_nerevar_config_at(&path).expect("config should load");
+        assert!(
+            config.owned_instances.as_ref().unwrap()[0]
+                .runtime_hint
+                .is_none(),
+            "a config written before the field must load as no suggestion"
+        );
+
+        let hint = RuntimeSource::GithubRelease {
+            repo: "owner/name".to_string(),
+            release_id: "999".to_string(),
+            tag: "v1.2.3".to_string(),
+            asset_name: String::new(),
+        };
+        config.owned_instances.as_mut().unwrap()[0].runtime_hint = Some(hint.clone());
+        std::fs::write(&path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
+
+        // Written under the camelCase name the daemon's operator docs name.
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            raw.contains("\"runtimeHint\""),
+            "not written as runtimeHint: {raw}"
+        );
+
+        let reloaded = load_nerevar_config_at(&path).expect("config should reload");
+        assert_eq!(
+            reloaded.owned_instances.as_ref().unwrap()[0].runtime_hint,
+            Some(hint)
+        );
+        // An instance with no suggestion writes no key at all, so an older
+        // build reading this file sees exactly what it saw before.
+        assert!(
+            !serde_json::to_string(&reloaded.synced_instances.as_ref().unwrap()[0])
+                .unwrap()
+                .contains("runtimeHint")
+        );
     }
 
     /// A config this build writes keeps the legacy `releaseId` alongside the

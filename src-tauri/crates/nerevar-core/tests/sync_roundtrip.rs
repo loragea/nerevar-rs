@@ -39,6 +39,7 @@ use nerevar_core::instance_data::{
 use nerevar_core::nerevar_server::state::ServerContext;
 use nerevar_core::nerevar_server::{serve, try_bind};
 use nerevar_core::reporter::CollectingEventSink;
+use nerevar_core::runtime::RuntimeSource;
 use nerevar_core::sync_auth::SYNC_PASSWORD_HEADER;
 use nerevar_core::sync_client::download::{download_manifest_files, DownloadOutcome};
 use nerevar_core::sync_client::{fetch_full_manifest, fetch_manifest_summary};
@@ -136,6 +137,14 @@ async fn host_client_sync_roundtrip() {
         host.hosting_data_dir = Some(data_dir.clone());
         host.hosting_instance_root = Some(instance_root.clone());
         host.hosting_sync_password = Some(SYNC_PASSWORD.to_string());
+        // What `activate_hosting` snapshots from the hosted instance's
+        // `runtime_hint`: the runtime this host suggests to its players.
+        host.hosting_runtime_hint = Some(RuntimeSource::GithubRelease {
+            repo: "owner/name".to_string(),
+            release_id: "4242".to_string(),
+            tag: "0.8.1".to_string(),
+            asset_name: String::new(),
+        });
     }
     let manifest_cache = new_shared_hosting_manifest_cache();
     let ctx = ServerContext::new(sync_host.clone(), manifest_cache.clone());
@@ -184,6 +193,17 @@ async fn host_client_sync_roundtrip() {
     assert_eq!(summary.package_count, 2);
     assert!(summary.password_required);
     assert_eq!(summary.total_download_bytes, expected_total_bytes);
+    // The advertised runtime reaches the client through the summary, intact.
+    assert_eq!(
+        summary.runtime_hint,
+        Some(RuntimeSource::GithubRelease {
+            repo: "owner/name".to_string(),
+            release_id: "4242".to_string(),
+            tag: "0.8.1".to_string(),
+            asset_name: String::new(),
+        }),
+        "the host's runtime suggestion must be served in the summary"
+    );
 
     let fetched = fetch_full_manifest(host, port, Some(SYNC_PASSWORD))
         .await

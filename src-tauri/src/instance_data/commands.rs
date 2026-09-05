@@ -306,6 +306,10 @@ pub async fn save_and_host_instance(
         .map(|settings| settings.password)
         .unwrap_or_default();
 
+    // Re-read rather than captured before the rebuild: the operator may have
+    // changed the suggestion while the manifest was being built.
+    let runtime_hint = resolve_instance(&state, &instance_id)?.runtime_hint;
+
     let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app_for_host));
     activate_hosting(
         sync_host.inner(),
@@ -314,6 +318,7 @@ pub async fn save_and_host_instance(
         data_dir_for_host,
         instance_root_for_host,
         sync_password,
+        runtime_hint,
         sink,
     )?;
     Ok(manifest)
@@ -352,6 +357,10 @@ pub async fn set_hosting_instance(
         .map(|settings| settings.password)
         .unwrap_or_default();
 
+    // Re-read rather than captured before the rebuild: the operator may have
+    // changed the suggestion while the manifest was being built.
+    let runtime_hint = resolve_instance(&state, &instance_id)?.runtime_hint;
+
     let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app_for_host));
     activate_hosting(
         sync_host.inner(),
@@ -360,6 +369,7 @@ pub async fn set_hosting_instance(
         data_dir_for_host,
         instance_root_for_host,
         sync_password,
+        runtime_hint,
         sink,
     )?;
     Ok(manifest)

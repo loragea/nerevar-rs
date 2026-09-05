@@ -109,6 +109,7 @@ pub fn activate_hosting_instance(
         data_dir,
         instance_root,
         sync_password,
+        instance.runtime_hint.clone(),
         sink,
     )?;
     Ok(manifest)

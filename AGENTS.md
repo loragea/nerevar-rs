@@ -19,12 +19,15 @@ Tauri 2 application, three parts:
     `sync_auth.rs`), the embedded HTTP server (`nerevar_server/`), process
     management (`process_manager/`), config (`config/`), the client-pulled
     TES3MP runtime (`runtime/`: `RuntimeSource` says where an instance's
-    build comes from — a GitHub release over the releases API
-    (`github_getters.rs`), a directory the user already has, or an archive
-    on disk — `acquire` installs it *into* the instance's `tes3mp/`, and
-    `inspect` reports what landed), and the supervisor that wires them
-    together (`supervisor.rs`, `app_state.rs`). No Tauri dependency, so it's
-    reusable by non-GUI frontends — which is what `nerevar-host` is.
+    build comes from — a release of any GitHub repository over the releases
+    API (`github_getters.rs`; official `tes3mp/tes3mp` by default), a
+    directory the user already has, or an archive on disk — `acquire`
+    installs it *into* the instance's `tes3mp/`, `inspect` reports what
+    landed, and a host may *advertise* a `githubRelease` as its instance's
+    `runtime_hint` for connecting clients to preselect), and the supervisor
+    that wires them together (`supervisor.rs`, `app_state.rs`). No Tauri
+    dependency, so it's reusable by non-GUI frontends — which is what
+    `nerevar-host` is.
     Its `test-util` feature gates test-only helpers (e.g.
     `reporter::CollectingEventSink`) for use from integration tests in
     `crates/nerevar-core/tests/`.

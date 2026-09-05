@@ -4,7 +4,9 @@ use tauri::{AppHandle, State};
 
 use crate::data::{InstanceConnectionSettings, InstanceEditPayload};
 use crate::reporter::{EventSink, TauriEventSink};
+use crate::sync_host::SharedSyncHost;
 use crate::AppState;
+use nerevar_core::runtime::RuntimeSource;
 
 /// Top-layer split (step 7, see notes/core-split-plan.md): logic moved into
 /// `nerevar_core::connection::instance_edit`. This residue just unwraps
@@ -30,4 +32,24 @@ pub fn update_instance(
 ) -> Result<InstanceConnectionSettings, String> {
     let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app));
     nerevar_core::connection::instance_edit::update_instance(state.inner(), sink, edit)
+}
+
+/// Same split again: the host operator's "suggest this runtime to players"
+/// control writes through here.
+#[tauri::command]
+pub fn set_instance_runtime_hint(
+    app: AppHandle,
+    state: State<'_, Mutex<AppState>>,
+    sync_host: State<'_, SharedSyncHost>,
+    instance_id: String,
+    hint: Option<RuntimeSource>,
+) -> Result<Option<RuntimeSource>, String> {
+    let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app));
+    nerevar_core::connection::instance_edit::set_instance_runtime_hint(
+        state.inner(),
+        sync_host.inner(),
+        sink,
+        instance_id,
+        hint,
+    )
 }

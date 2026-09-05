@@ -14,6 +14,7 @@ use tokio_util::io::ReaderStream;
 use crate::instance_data::{load_manifest, manifest_path};
 use crate::instance_setup::{instance_tes3mp_dir, read_tes3mp_server_settings};
 use crate::nerevar_server::state::ServerContext;
+use crate::runtime::RuntimeSource;
 use crate::sync_auth::{sync_password_matches, SYNC_PASSWORD_HEADER};
 use crate::sync_host::get_package_file_path;
 use crate::sync_paths::normalize_manifest_file_path;
@@ -28,6 +29,11 @@ struct ManifestSummary {
     tes3mp_server_port: u16,
     password_required: bool,
     packages: Vec<ManifestPackageSummary>,
+    /// The runtime the operator advertises, when there is one. Omitted
+    /// entirely otherwise, which is also what a host older than the field
+    /// sends — a client reads both as "no suggestion".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runtime_hint: Option<RuntimeSource>,
 }
 
 #[derive(Serialize)]
@@ -146,6 +152,21 @@ fn password_required(state: &ServerContext) -> Result<bool, (StatusCode, String)
     Ok(crate::sync_auth::sync_password_required(&expected))
 }
 
+/// The runtime hint the hosted instance advertises, snapshotted into the
+/// hosting state when hosting started (the request path has no config to
+/// read).
+fn hosting_runtime_hint(
+    state: &ServerContext,
+) -> Result<Option<RuntimeSource>, (StatusCode, String)> {
+    let host = state.sync_host.lock().map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Lock poisoned".to_string(),
+        )
+    })?;
+    Ok(host.hosting_runtime_hint.clone())
+}
+
 async fn root_manifest_summary(
     State(state): State<Arc<ServerContext>>,
     headers: HeaderMap,
@@ -154,6 +175,7 @@ async fn root_manifest_summary(
     let data_dir = hosting_data_dir(&state).await?;
     let manifest = load_manifest(&data_dir).map_err(|e| (StatusCode::NOT_FOUND, e))?;
     let password_required = password_required(&state)?;
+    let runtime_hint = hosting_runtime_hint(&state)?;
 
     let packages: Vec<ManifestPackageSummary> = manifest
         .packages
@@ -175,6 +197,7 @@ async fn root_manifest_summary(
         tes3mp_server_port: manifest.tes3mp_server_port,
         password_required,
         packages,
+        runtime_hint,
     }))
 }
 

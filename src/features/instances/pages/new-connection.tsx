@@ -14,7 +14,12 @@ import { useConfig } from "@/features/config/context/config-context-provider";
 import { RuntimeSourceField } from "@/features/instances/components/runtime-source-field";
 import { useBackgroundOperation } from "@/features/instances/context/background-operation-context";
 import { formatByteSize } from "@/lib/format";
-import type { NewConnectionConfig, RemoteManifestSummary } from "@/types";
+import { TES3MP_REPO } from "@/features/instances/schemas/runtime-source-schema";
+import type {
+  GithubReleaseResponse,
+  NewConnectionConfig,
+  RemoteManifestSummary,
+} from "@/types";
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -52,6 +57,13 @@ export function NewConnectionPage() {
   // rather than letting the create fail after the copy.
   const [runtimeBlocked, setRuntimeBlocked] = useState(false);
   const [preview, setPreview] = useState<RemoteManifestSummary | null>(null);
+  // What the host suggested, kept only to say so on screen: the suggestion
+  // is never stored anywhere but the `runtime` the user ends up confirming.
+  const [hostSuggestion, setHostSuggestion] = useState<{
+    repo: string;
+    tag: string;
+    resolved: boolean;
+  } | null>(null);
   const [syncInstanceId, setSyncInstanceId] = useState("");
 
   const sync = useInstanceSync(syncInstanceId);
@@ -81,6 +93,54 @@ export function NewConnectionPage() {
     );
   }, [connectionName, config?.rootPath, form]);
 
+  /**
+   * Preselects the runtime the host advertises, if it advertises one.
+   *
+   * A suggestion is a starting point, never an instruction: the picker is set
+   * to the named GitHub repository (and to the named release when that repo
+   * still publishes it), the page says where the choice came from, and every
+   * part of it stays editable. A host that advertises nothing leaves the
+   * field exactly as it was.
+   */
+  const applyHostRuntimeHint = async (summary: RemoteManifestSummary) => {
+    const hint = summary.runtimeHint;
+    if (!hint || hint.kind !== "githubRelease") {
+      setHostSuggestion(null);
+      return;
+    }
+
+    const repo = hint.repo || TES3MP_REPO;
+    let releaseId = "";
+    let tag = "";
+    try {
+      const releases = await invoke<GithubReleaseResponse[]>(
+        "get_all_releases",
+        { repo },
+      );
+      const match =
+        releases.find((release) => release.tag_name === hint.tag) ??
+        releases.find((release) => release.id.toString() === hint.releaseId);
+      if (match) {
+        releaseId = match.id.toString();
+        tag = match.tag_name;
+      }
+    } catch {
+      // The repository could not be listed (offline, renamed, private). The
+      // repo still goes into the picker, which reports the failure itself.
+    }
+
+    form.setValue(
+      "runtime",
+      { kind: "githubRelease", repo, releaseId, tag, assetName: "" },
+      { shouldValidate: false },
+    );
+    setHostSuggestion({
+      repo,
+      tag: hint.tag,
+      resolved: releaseId.length > 0,
+    });
+  };
+
   const testConnection = async () => {
     const values = form.getValues();
     const parsed = newConnectionSchema.safeParse(values);
@@ -105,6 +165,7 @@ export function NewConnectionPage() {
         },
       );
       setPreview(summary);
+      await applyHostRuntimeHint(summary);
       toast.success(`Connected to ${summary.instanceName}`);
     } catch (error) {
       toast.error(`Connection test failed: ${error}`);
@@ -207,6 +268,15 @@ export function NewConnectionPage() {
                       disabled={busy}
                       onBlockingChange={setRuntimeBlocked}
                     />
+                    {hostSuggestion ? (
+                      <p className="text-left font-mono text-xs text-accent/90">
+                        Suggested by the host: {hostSuggestion.repo}{" "}
+                        {hostSuggestion.tag || "(no release named)"}
+                        {hostSuggestion.resolved
+                          ? ""
+                          : " — not found in that repository; pick a release yourself"}
+                      </p>
+                    ) : null}
                     {fieldState.error ? (
                       <FieldError errors={[fieldState.error]} />
                     ) : null}

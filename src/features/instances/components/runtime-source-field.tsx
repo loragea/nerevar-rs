@@ -3,6 +3,8 @@ import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   emptySourceOfKind,
+  normalizeRepo,
+  TES3MP_REPO,
   type RuntimeSourceKind,
 } from "@/features/instances/schemas/runtime-source-schema";
 import { ReleaseSelector } from "@/features/tes3mp-releases/components/release-selector";
@@ -40,8 +42,9 @@ type InspectionState =
 /**
  * Picks where an instance's TES3MP runtime comes from.
  *
- * The `githubRelease` branch is the default and renders exactly the release
- * dropdown it always did; the two local branches add a path field, a native
+ * The `githubRelease` branch is the default: a repository (the official one
+ * unless the user names a fork's) and the release dropdown listing that
+ * repository's releases. The two local branches add a path field, a native
  * picker, and an inline inspection of what was picked.
  *
  * `onBlockingChange` reports whether the current pick would fail the create:
@@ -91,6 +94,9 @@ export function RuntimeSourceField({
       });
   }, [value.kind, path]);
 
+  const repoIsUsable =
+    value.kind === "githubRelease" && normalizeRepo(value.repo) !== null;
+
   const blocked =
     inspection.status === "checking" ||
     inspection.status === "error" ||
@@ -105,6 +111,22 @@ export function RuntimeSourceField({
     // segmented choice always has exactly one answer.
     if (!next || next === value.kind) return;
     onValueChange(emptySourceOfKind(next as RuntimeSourceKind));
+  };
+
+  // A repository change invalidates the release: an id from one repo names
+  // nothing in another. The field keeps what was typed (so the user can
+  // finish typing an incomplete name) and normalises it on blur.
+  const handleRepoChange = (repo: string) => {
+    if (value.kind !== "githubRelease") return;
+    onValueChange({ ...value, repo, releaseId: "", tag: "" });
+  };
+
+  const handleRepoBlur = (repo: string) => {
+    if (value.kind !== "githubRelease") return;
+    const normalized = normalizeRepo(repo);
+    if (normalized !== null && normalized !== repo) {
+      onValueChange({ ...value, repo: normalized, releaseId: "", tag: "" });
+    }
   };
 
   const browse = () => {
@@ -136,7 +158,33 @@ export function RuntimeSourceField({
       </ToggleGroup>
 
       {value.kind === "githubRelease" ? (
-        <ReleaseSelector value={value} onValueChange={onValueChange} />
+        <>
+          <div className="flex flex-col gap-1">
+            <Input
+              value={value.repo}
+              spellCheck={false}
+              autoCapitalize="none"
+              autoCorrect="off"
+              placeholder={TES3MP_REPO}
+              aria-label="GitHub repository"
+              disabled={disabled}
+              className="font-mono text-xs"
+              onChange={(event) => handleRepoChange(event.target.value)}
+              onBlur={(event) => handleRepoBlur(event.target.value)}
+            />
+            <p className="text-left font-sans text-xs leading-loose font-light tracking-[0.1em] text-foreground/75">
+              {repoIsUsable
+                ? `Releases published by ${normalizeRepo(value.repo)}. The official ${TES3MP_REPO} is the default; a fork that publishes its own builds goes here.`
+                : "Enter the repository as owner/name (a pasted github.com link works too)."}
+            </p>
+          </div>
+          <ReleaseSelector
+            value={value}
+            onValueChange={onValueChange}
+            repo={value.repo}
+            disabled={disabled}
+          />
+        </>
       ) : (
         <>
           <p className="text-left font-sans text-xs leading-loose font-light tracking-[0.1em] text-foreground/75">

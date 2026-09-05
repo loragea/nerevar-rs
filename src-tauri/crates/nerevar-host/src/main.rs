@@ -17,6 +17,7 @@ use nerevar_core::instance_setup::{instance_tes3mp_dir, read_tes3mp_server_setti
 use nerevar_core::nerevar_server::state::ServerContext;
 use nerevar_core::process_manager::{launch_tes3mp_server, ProcessManager, ProcessRole};
 use nerevar_core::reporter::EventSink;
+use nerevar_core::runtime::normalize_runtime_hint;
 use nerevar_core::supervisor::run_server_supervisor;
 use nerevar_core::sync_host::{
     activate_hosting, deactivate_hosting, new_shared_hosting_manifest_cache, new_shared_sync_host,
@@ -133,6 +134,18 @@ async fn run(cli: Cli) -> Result<i32, String> {
     let server_ctx = ServerContext::new(sync_host.clone(), manifest_cache.clone());
     let sink: Arc<dyn EventSink> = Arc::new(LogEventSink);
 
+    // The hint is advertised, not applied: a malformed one costs players a
+    // preselected runtime, which is no reason to refuse to host. `--check`
+    // prints the same verdict before a run.
+    let runtime_hint = match instance.runtime_hint.clone().map(normalize_runtime_hint) {
+        Some(Ok(hint)) => Some(hint),
+        Some(Err(err)) => {
+            log::warn!("Ignoring this instance's runtimeHint: {err}");
+            None
+        }
+        None => None,
+    };
+
     activate_hosting(
         &sync_host,
         &manifest_cache,
@@ -140,6 +153,7 @@ async fn run(cli: Cli) -> Result<i32, String> {
         data_dir.clone(),
         instance_root.clone(),
         sync_password,
+        runtime_hint,
         sink.clone(),
     )?;
     log::info!(
