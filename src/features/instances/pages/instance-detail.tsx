@@ -10,6 +10,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { SyncProgressPanel } from "@/features/instances/components/sync-progress-panel";
 import { InstanceEditSection } from "@/features/instances/components/instance-edit-section";
+import { RuntimeHintSection } from "@/features/instances/components/runtime-hint-section";
 import { DeleteInstanceSection } from "@/features/instances/components/delete-instance-section";
 import { useConfig } from "@/features/config/context/config-context-provider";
 import { useInstanceProcess } from "@/features/instances/hooks/use-instance-process";
@@ -337,6 +338,15 @@ function OwnedInstanceDetail({ instance }: { instance: InstanceConfig }) {
         description="Edit instance name, server hostname, game port, and password."
       >
         <InstanceEditSection instanceId={instance.id} isSynced={false} />
+      </DetailSection>
+
+      <Separator className="bg-border/60" />
+
+      <DetailSection
+        title="Suggest this runtime to players"
+        description="Advertised to anyone who connects, so they do not have to find the right TES3MP build themselves."
+      >
+        <RuntimeHintSection instance={instance} />
       </DetailSection>
 
       <Separator className="bg-border/60" />

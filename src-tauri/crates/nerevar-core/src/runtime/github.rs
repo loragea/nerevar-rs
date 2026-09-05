@@ -4,22 +4,27 @@
 use crate::data::{GithubAssetResponse, GithubReleaseResponse};
 use crate::github_getters::fetch_github_releases;
 
-use super::source::TargetPlatform;
+use super::source::{normalize_repo, TargetPlatform};
 
 /// Fetches the release with `release_id` from `repo`.
 ///
 /// One HTTP call: the GitHub releases listing is fetched once and searched
 /// locally. (The old download path listed the releases *and* had its caller
 /// list them again to populate the picker.)
+///
+/// `repo` reaches here from an instance's stored `RuntimeSource`, which a
+/// custom-repo picker or a hand-edited config wrote, so it is normalised
+/// before it becomes a URL.
 pub async fn fetch_release_by_id(
     repo: &str,
     release_id: &str,
 ) -> Result<GithubReleaseResponse, String> {
+    let repo = normalize_repo(repo)?;
     let wanted: u64 = release_id
         .parse()
         .map_err(|_| format!("Invalid release id: {release_id}"))?;
 
-    let releases = fetch_github_releases(repo, "Tes3MP").await?;
+    let releases = fetch_github_releases(&repo, "Tes3MP").await?;
     releases
         .into_iter()
         .find(|release| release.id == wanted)
@@ -36,13 +41,29 @@ pub fn select_tes3mp_asset(
     platform: TargetPlatform,
 ) -> Result<&GithubAssetResponse, String> {
     let release_id = release.id.to_string();
-    match platform {
+    let selected = match platform {
         TargetPlatform::Windows => select_windows_asset(&release.assets, &release_id),
         TargetPlatform::Linux => select_linux_asset(&release.assets, &release_id),
         TargetPlatform::MacOs => Err(format!(
             "No supported release asset exists for this platform (release {release_id})"
         )),
+    };
+
+    // A custom repository is the reason this matters: the rules are written
+    // for the official asset names, so a fork that names its builds
+    // differently fails here. Naming what the release *did* hold is what
+    // separates "this fork names its assets differently" from "this release
+    // has no builds attached".
+    selected.map_err(|error| format!("{error}. {}", describe_assets(&release.assets)))
+}
+
+/// The tail of a no-matching-asset error: what the release actually offered.
+fn describe_assets(assets: &[GithubAssetResponse]) -> String {
+    if assets.is_empty() {
+        return "This release has no assets attached.".to_string();
     }
+    let names: Vec<&str> = assets.iter().map(|asset| asset.name.as_str()).collect();
+    format!("Assets in this release: {}", names.join(", "))
 }
 
 /// Looks up an asset by its exact file name — the path taken when a caller
@@ -224,6 +245,48 @@ mod tests {
             .err()
             .unwrap()
             .contains("No supported release asset exists for this platform (release 123)"));
+    }
+
+    /// A fork that publishes its runtime under its own asset names fails the
+    /// platform rule; the error must show the names so the user can tell a
+    /// naming mismatch from an empty release.
+    #[test]
+    fn a_no_match_error_names_the_assets_that_were_there() {
+        let release = release(
+            77,
+            vec![
+                asset("runtime-linux-x86_64.7z"),
+                asset("runtime-windows-x64.7z"),
+            ],
+        );
+
+        for platform in [
+            TargetPlatform::Windows,
+            TargetPlatform::Linux,
+            TargetPlatform::MacOs,
+        ] {
+            let error = select_tes3mp_asset(&release, platform)
+                .err()
+                .expect("no rule can match these names");
+            assert!(
+                error.contains(
+                    "Assets in this release: runtime-linux-x86_64.7z, runtime-windows-x64.7z"
+                ),
+                "{platform:?} error did not name the assets: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_release_with_no_assets_says_so() {
+        let release = release(78, vec![]);
+        let error = select_tes3mp_asset(&release, TargetPlatform::Linux)
+            .err()
+            .expect("nothing to select");
+        assert!(
+            error.contains("This release has no assets attached."),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

@@ -778,7 +778,12 @@ mod tests {
         let scratch = scratch("e2e");
         let dest = scratch.0.join("tes3mp");
 
-        let releases = get_all_releases().await.expect("failed to fetch releases");
+        // Named explicitly rather than left to default, so this is also the
+        // one test that drives the custom-repo listing path against the real
+        // API — with the official repo as the repository.
+        let releases = get_all_releases(Some(DEFAULT_TES3MP_REPO))
+            .await
+            .expect("failed to fetch releases");
         let release = releases
             .iter()
             .find(|r| r.tag_name == "tes3mp-0.8.1")

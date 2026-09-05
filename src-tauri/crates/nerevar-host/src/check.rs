@@ -5,7 +5,7 @@ use nerevar_core::instance_data::{
     load_load_order, load_manifest, load_order_path, manifest_path, resolve_package_data_dir,
 };
 use nerevar_core::instance_setup::instance_tes3mp_dir;
-use nerevar_core::runtime::inspect;
+use nerevar_core::runtime::{inspect, normalize_runtime_hint, RuntimeSource};
 
 use crate::config::ResolvedConfig;
 
@@ -49,6 +49,16 @@ pub fn run_check(resolved: &ResolvedConfig, instance: &InstanceConfig, sync_port
             }
         }
         Err(err) => println!("  tes3mp runtime: {err}"),
+    }
+    match instance.runtime_hint.clone().map(normalize_runtime_hint) {
+        Some(Ok(RuntimeSource::GithubRelease { repo, tag, .. })) => {
+            let tag = if tag.is_empty() { "(no tag)" } else { &tag };
+            println!("  runtime hint:   suggests {repo} {tag} to players");
+        }
+        // `normalize_runtime_hint` only ever returns a `GithubRelease`.
+        Some(Ok(_)) => unreachable!("a normalized hint is always a github release"),
+        Some(Err(err)) => println!("  runtime hint:   IGNORED ({err})"),
+        None => {}
     }
 
     let root_ok = instance_root.is_dir();

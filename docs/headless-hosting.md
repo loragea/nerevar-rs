@@ -130,6 +130,43 @@ Every key shown is required (`syncedInstances`/`rootPath` may be `null`).
 port, distinct from the TES3MP game port. `id` is what `--instance` matches
 (name works too).
 
+#### Suggesting a TES3MP runtime to players (optional)
+
+Players pull their own TES3MP build; the host never sends one. If your server
+needs a particular build — a fork that publishes its runtime as GitHub
+releases in its own repository, say — add a `runtimeHint` to the instance and
+the daemon advertises it in the manifest summary. A connecting player's
+runtime picker preselects that repository and release and says the suggestion
+came from you; they can still choose anything else.
+
+```json
+{
+  "id": "mundus",
+  "name": "Mundus Patens",
+  "description": "Friend-group server",
+  "path": "/srv/nerevar/mundus",
+  "dataDir": "/srv/nerevar/mundus/data",
+  "runtimeHint": {
+    "kind": "githubRelease",
+    "repo": "owner/name",
+    "releaseId": "",
+    "tag": "0.8.1"
+  }
+}
+```
+
+`repo` is `owner/name`; `tag` is the release tag as published there, and is
+what the client matches against the repository's releases (`releaseId` may be
+left empty). Only `"kind": "githubRelease"` can be advertised — a path on this
+machine means nothing on a player's — and the repository must be public, since
+Nerevar does not sign in to GitHub. Omit the key entirely to suggest nothing,
+which is the default. `--check` reports what will be advertised, and says so
+when a hint is unusable and will be ignored:
+
+```
+  runtime hint:   suggests owner/name 0.8.1 to players
+```
+
 ### 5. A load order
 
 The load order (`data/.nerevar/load-order.json`) decides which packages are

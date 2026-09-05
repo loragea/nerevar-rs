@@ -14,4 +14,6 @@ pub mod source;
 pub use acquire::acquire;
 pub use github::select_tes3mp_asset;
 pub use inspect::{inspect, inspect_archive, inspect_source, RuntimeInfo, RuntimeInspection};
-pub use source::{RuntimeSource, TargetPlatform, DEFAULT_TES3MP_REPO};
+pub use source::{
+    normalize_repo, normalize_runtime_hint, RuntimeSource, TargetPlatform, DEFAULT_TES3MP_REPO,
+};

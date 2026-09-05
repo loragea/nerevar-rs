@@ -4,11 +4,23 @@
 //! TES3MP runtime, downloading and extracting it — lives in `runtime`.
 
 use crate::data::GithubReleaseResponse;
+use crate::runtime::{normalize_repo, DEFAULT_TES3MP_REPO};
 use log::{error, info};
 use reqwest::Client;
 
-pub async fn get_all_releases() -> Result<Vec<GithubReleaseResponse>, String> {
-    fetch_github_releases("tes3mp/tes3mp", "Tes3MP").await
+/// Lists the releases of a TES3MP repository — `repo` when the caller named
+/// one, [`DEFAULT_TES3MP_REPO`] otherwise.
+///
+/// The repository is a caller-supplied string (the runtime picker's repo
+/// field, an instance's `RuntimeSource`), so it is normalised and validated
+/// here rather than pasted into a URL: `owner/name` is the only shape that
+/// reaches the API.
+pub async fn get_all_releases(repo: Option<&str>) -> Result<Vec<GithubReleaseResponse>, String> {
+    let repo = match repo.map(str::trim).filter(|repo| !repo.is_empty()) {
+        Some(repo) => normalize_repo(repo)?,
+        None => DEFAULT_TES3MP_REPO.to_string(),
+    };
+    fetch_github_releases(&repo, "Tes3MP").await
 }
 
 // Takes `repo` as a parameter (rather than reaching for the app crate's
@@ -40,6 +52,15 @@ pub(crate) async fn fetch_github_releases(
             return Err(e.to_string());
         }
     };
+
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        error!("fetch_github_releases HTTP 404 for {repo}");
+        // Nerevar sends no GitHub credentials, so a private repository is
+        // indistinguishable from one that does not exist — say both.
+        return Err(format!(
+            "GitHub repository {repo} not found or private. Nerevar does not sign in to GitHub, so private repositories cannot be used."
+        ));
+    }
 
     if !response.status().is_success() {
         let status = response.status();

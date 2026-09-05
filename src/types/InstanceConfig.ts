@@ -15,4 +15,14 @@ releaseId?: string | null,
  * Where this instance's TES3MP runtime came from. Absent only in
  * configs written before the field existed, which the loader migrates.
  */
-runtime?: RuntimeSource | null, remoteHost?: string | null, remoteSyncPort?: number | null, lastSyncedAt?: string | null, tes3mpServerPort?: number | null, syncPassword?: string | null, };
+runtime?: RuntimeSource | null, 
+/**
+ * A runtime this instance's *host operator* advertises to players
+ * connecting to it: the client's runtime picker preselects it and says
+ * where it came from, and the player is free to change it. Only
+ * `RuntimeSource::GithubRelease` is meaningful (see
+ * `runtime::normalize_runtime_hint`) — a path on the host's disk means
+ * nothing on a player's machine. Absent means "no suggestion", which is
+ * what every config written before this field says.
+ */
+runtimeHint?: RuntimeSource | null, remoteHost?: string | null, remoteSyncPort?: number | null, lastSyncedAt?: string | null, tes3mpServerPort?: number | null, syncPassword?: string | null, };

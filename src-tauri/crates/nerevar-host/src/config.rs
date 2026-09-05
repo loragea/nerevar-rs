@@ -170,5 +170,64 @@ mod tests {
         let owned = resolved.config.owned_instances.expect("owned instances");
         assert!(owned[0].runtime.is_none());
         assert!(owned[0].release_id.is_none());
+        assert!(owned[0].runtime_hint.is_none());
+    }
+
+    /// The operator's way to advertise a runtime is to add `runtimeHint` to
+    /// an existing config by hand (docs/headless-hosting.md) — an old-style
+    /// entry, legacy `releaseId` and all, plus the one new key.
+    #[test]
+    fn a_hand_added_runtime_hint_loads_from_an_old_style_config() {
+        let scratch = scratch("hint");
+        let path = scratch.0.join("config.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "onboardingComplete": true,
+              "ownedInstances": [
+                {
+                  "id": "host-1",
+                  "name": "Host",
+                  "description": "",
+                  "path": "/instances/host",
+                  "dataDir": "/instances/host/data",
+                  "releaseId": "65767406",
+                  "runtimeHint": {
+                    "kind": "githubRelease",
+                    "repo": "owner/name",
+                    "releaseId": "",
+                    "tag": "0.8.1"
+                  }
+                }
+              ],
+              "syncedInstances": null,
+              "rootPath": "/instances",
+              "syncPort": 25567
+            }"#,
+        )
+        .unwrap();
+
+        let resolved = resolve_and_load_config(Some(&path)).expect("config should load");
+        let owned = resolved.config.owned_instances.expect("owned instances");
+        assert_eq!(
+            owned[0].runtime_hint,
+            Some(RuntimeSource::GithubRelease {
+                repo: "owner/name".to_string(),
+                release_id: String::new(),
+                tag: "0.8.1".to_string(),
+                asset_name: String::new(),
+            })
+        );
+        // The hint is a suggestion for players and never the host's own
+        // runtime: the legacy migration still governs `runtime`.
+        assert_eq!(
+            owned[0].runtime,
+            Some(RuntimeSource::GithubRelease {
+                repo: DEFAULT_TES3MP_REPO.to_string(),
+                release_id: "65767406".to_string(),
+                tag: String::new(),
+                asset_name: String::new(),
+            })
+        );
     }
 }

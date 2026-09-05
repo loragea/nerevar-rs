@@ -24,6 +24,15 @@ pub struct InstanceConfig {
     /// configs written before the field existed, which the loader migrates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<RuntimeSource>,
+    /// A runtime this instance's *host operator* advertises to players
+    /// connecting to it: the client's runtime picker preselects it and says
+    /// where it came from, and the player is free to change it. Only
+    /// `RuntimeSource::GithubRelease` is meaningful (see
+    /// `runtime::normalize_runtime_hint`) — a path on the host's disk means
+    /// nothing on a player's machine. Absent means "no suggestion", which is
+    /// what every config written before this field says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_hint: Option<RuntimeSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_host: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
