@@ -7,10 +7,16 @@ use nerevar_core::instance_data::{
 
 /// Rescans the instance data directory and merges the result into
 /// `load-order.json`: new package folders are appended (enabled, lowest
-/// priority), vanished ones dropped, plugin lists and tree checksums
-/// refreshed. This is the headless equivalent of the GUI data manager's
-/// rescan, and the second half of "drop a mod folder on the host" — the
-/// first half being `rsync`.
+/// priority), vanished ones dropped, plugin lists refreshed. This is the
+/// headless equivalent of the GUI data manager's rescan, and the second half
+/// of "drop a mod folder on the host" — the first half being `rsync`.
+///
+/// A scan does *not* hash anything: it reads directory entries and filenames
+/// only, so it stays cheap on a large data directory. Package checksums are
+/// produced by the manifest rebuild in [`prepare`], which hashes every
+/// enabled package from disk; the load order's own `treeChecksum` field is
+/// only ever filled in on the client side, from a manifest a client
+/// downloaded.
 pub fn scan_data_dir(data_dir: &Path) -> Result<(), String> {
     let mut no_progress = None;
     let load_order = scan_and_merge_load_order(data_dir, &mut no_progress)?;

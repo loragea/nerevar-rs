@@ -178,9 +178,12 @@ sudo -u nerevar nerevar-host --config /etc/nerevar/config.json --scan --check
 
 `--scan` scans `data/` and merges the result into `load-order.json` — new
 package directories are appended (enabled, lowest priority), directories that
-have disappeared are dropped, plugin lists and checksums are refreshed. It is
-the headless equivalent of the data manager's rescan in the app. `--check` then
-prints what would be hosted and exits without starting anything:
+have disappeared are dropped, plugin lists are refreshed. It is the headless
+equivalent of the data manager's rescan in the app. A scan reads directory
+entries and filenames only; it hashes nothing, so it stays fast on a large
+`data/`. Checksums are computed by the manifest rebuild that every normal run
+does at startup. `--check` then prints what would be hosted and exits without
+starting anything:
 
 ```
 nerevar-host --check

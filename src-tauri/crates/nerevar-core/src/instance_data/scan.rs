@@ -13,7 +13,13 @@ const DATA_DIR_NAMES: &[&str] = &[
     "meshes", "textures", "icons", "music", "sound", "bookart", "fonts", "video",
 ];
 
-/// Scan immediate child folders of the instance data directory (e.g. `Better Bodies/`, `Rock Replacer/`).
+/// Scan immediate child folders of the instance data directory (e.g. `Better
+/// Bodies/`, `Rock Replacer/`).
+///
+/// Metadata only: directory entries and filenames, never file contents. That
+/// is why every [`ScannedPackage`] comes back with `tree_checksum: None` —
+/// hashing is the manifest build's job (`build_manifest`), which is what
+/// produces the checksums clients actually compare against.
 pub fn scan_data_directory(
     data_dir: &Path,
     progress: &mut Option<ProgressEmitter>,
@@ -64,6 +70,7 @@ pub fn scan_data_directory(
             kind,
             relative_dir: folder_name,
             plugins,
+            // Not computed here on purpose: see this function's doc comment.
             tree_checksum: None,
         });
     }
@@ -192,7 +199,10 @@ mod tests {
         assert_eq!(bb.relative_dir, "Better Bodies");
         assert!(matches!(bb.kind, PackageKind::Mod));
         assert!(bb.plugins.iter().any(|p| p.eq_ignore_ascii_case("betterbodies.esp")));
-        assert!(bb.tree_checksum.is_none());
+        assert!(
+            bb.tree_checksum.is_none(),
+            "a scan hashes nothing, so it reports no checksum"
+        );
 
         let rr = packages
             .iter()
