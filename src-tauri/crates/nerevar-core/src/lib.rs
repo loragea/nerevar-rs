@@ -1,9 +1,8 @@
 //! `nerevar-core`: the Tauri-free heart of Nerevar.
 //!
 //! Holds instance, sync, and process-management logic shared by the Tauri
-//! desktop app and (eventually) a headless `nerevar-host` daemon. Modules
-//! land here incrementally — see the PM plan doc's migration sequence for
-//! what has moved so far and what's still app-side.
+//! desktop app and the headless `nerevar-host` daemon. See AGENTS.md's
+//! "Architecture" section for what lives in which crate.
 
 pub mod app_state;
 pub mod config;

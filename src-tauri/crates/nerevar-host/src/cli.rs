@@ -5,7 +5,7 @@ use clap::Parser;
 /// Headless Nerevar host: activates sync hosting for one owned instance and
 /// (unless `--sync-only`) launches its TES3MP dedicated server. Foreground
 /// process — run it under systemd for service-ification. See
-/// notes/nerevar-host-design.md (PM root) for the full design.
+/// `docs/headless-hosting.md` for the full operator guide.
 #[derive(Parser, Debug)]
 #[command(name = "nerevar-host", version, about, long_about = None)]
 pub struct Cli {

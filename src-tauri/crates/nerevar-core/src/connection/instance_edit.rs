@@ -14,8 +14,8 @@ use crate::runtime::{normalize_runtime_hint, RuntimeSource};
 use crate::sync_host::{set_hosting_runtime_hint, SharedSyncHost};
 use crate::AppState;
 
-/// Top-layer split (step 7, see notes/core-split-plan.md): this fn was
-/// already pure logic behind its `#[tauri::command]` signature — it only
+/// Moved here by the Tauri/core split (see AGENTS.md, "Architecture"):
+/// this fn was already pure logic behind its `#[tauri::command]` signature — it only
 /// reads `State<Mutex<AppState>>` to resolve the instance, same shape as the
 /// mid-layer's `sync_client::sync::get_instance_sync_status`. The app-side
 /// residue (`src-tauri/src/connection/instance_edit.rs`) unwraps its `State`

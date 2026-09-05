@@ -8,7 +8,8 @@ use crate::sync_host::SharedSyncHost;
 use crate::AppState;
 use nerevar_core::runtime::RuntimeSource;
 
-/// Top-layer split (step 7, see notes/core-split-plan.md): logic moved into
+/// Command residue after the Tauri/core split (see AGENTS.md,
+/// "Architecture"): logic moved into
 /// `nerevar_core::connection::instance_edit`. This residue just unwraps
 /// Tauri's `State` into `state.inner()` and delegates.
 #[tauri::command]

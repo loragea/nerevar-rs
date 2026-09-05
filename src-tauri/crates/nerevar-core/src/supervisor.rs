@@ -2,8 +2,8 @@
 //! supervisor loop that (re)starts the server as its port, retry, and
 //! enabled signals change.
 //!
-//! Top-layer split (step 7, see notes/core-split-plan.md): moved into
-//! nerevar-core wholesale — already Tauri-free, since `run_server_supervisor`
+//! Moved into nerevar-core wholesale by the Tauri/core split (see
+//! AGENTS.md, "Architecture") — already Tauri-free, since `run_server_supervisor`
 //! spawns its worker tasks with `tokio::spawn` rather than
 //! `tauri::async_runtime::spawn`, as it always runs inside a Tokio runtime
 //! regardless of which binary (Tauri app or headless daemon) drives it. The
