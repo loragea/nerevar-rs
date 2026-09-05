@@ -22,11 +22,11 @@
 //! (see the second client phase below). The first client phase still downloads each file
 //! with a plain `reqwest` GET, exercising the raw package-file route directly.
 //!
-//! STILL NOT covered: mid-flight cancellation (the `cancel` AtomicBool flipping while
+//! NOT covered here: mid-flight cancellation (the `cancel` AtomicBool flipping while
 //! workers are in flight -> `DownloadOutcome::Cancelled`) and resume-after-partial (a
 //! second `download_manifest_files` call adopting files a prior run left on disk and
-//! skipping them via sync-state). Both are worth a dedicated test; this one only drives
-//! the clean, from-empty happy path through the engine.
+//! skipping them via sync-state). This test only drives the clean, from-empty happy path
+//! through the engine; those two paths live in `sync_cancel_resume.rs`.
 
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
