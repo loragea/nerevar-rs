@@ -171,13 +171,6 @@ async fn add_instance(
     config::add_instance(state.inner(), new_instance, operation_id).await
 }
 
-// #[tauri::command]
-// async fn download_and_run_openmw_wizard(state: State<'_, Mutex<AppState>>) -> Result<(), String> {
-//     config::download_and_run_openmw_wizard(state)
-//         .await
-//         .map_err(|e| e.to_string())
-// }
-
 #[tauri::command]
 async fn validate_global_openmw_config() -> Result<bool, String> {
     config::validate_global_openmw_config()

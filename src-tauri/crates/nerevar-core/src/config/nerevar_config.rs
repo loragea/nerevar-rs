@@ -12,11 +12,10 @@ use log::info;
 use uuid::Uuid;
 
 const CONFIG_FILE_NAME: &str = "config.json";
-// const TES3MP_081_RELEASE_ID: &str = "65767406";
 
 /// Same path as `app.path().app_data_dir()` / `config.json` (see Tauri
-/// `PathResolver::app_data_dir`). Top-layer split (step 7, see
-/// notes/core-split-plan.md): this used to call `tauri::generate_context!()`
+/// `PathResolver::app_data_dir`). After the Tauri/core split (see AGENTS.md,
+/// "Architecture") this used to call `tauri::generate_context!()`
 /// itself to get the app identifier; now it takes the identifier as a plain
 /// parameter so core stays Tauri-free. The app-side wrapper
 /// (`src-tauri/src/config/mod.rs`) resolves `context.config().identifier` via
@@ -34,7 +33,7 @@ pub fn nerevar_config_file_path(identifier: &str) -> PathBuf {
 /// instead of panicking. The GUI treats a resolvable user data dir as a
 /// startup invariant and keeps using the panicking form; the headless
 /// `nerevar-host` daemon's config-resolution fallback (see
-/// notes/nerevar-host-design.md) needs to handle the "doesn't resolve" case
+/// `docs/headless-hosting.md`, "The Nerevar config file") needs to handle the "doesn't resolve" case
 /// gracefully, so it uses this instead.
 pub fn nerevar_config_file_path_opt(identifier: &str) -> Option<PathBuf> {
     Some(dirs::data_dir()?.join(identifier).join(CONFIG_FILE_NAME))
@@ -97,7 +96,7 @@ fn migrate_runtime_sources(config: &mut NerevarConfig) {
 /// existing config file and errors if it is missing, instead of writing a
 /// default one. For callers that must never create config as a side effect
 /// of reading it (the headless `nerevar-host` daemon — see
-/// notes/nerevar-host-design.md's Config section; the GUI's onboarding flow
+/// `docs/headless-hosting.md`, "The Nerevar config file"; the GUI's onboarding flow
 /// is the only place auto-creation is desired).
 pub fn load_nerevar_config_at(config_path: &Path) -> Result<NerevarConfig, String> {
     if !config_path.exists() {
@@ -147,8 +146,8 @@ pub async fn complete_onboarding(state: &Mutex<AppState>) -> Result<(), String> 
 
     if start_sync_server {
         let sink = sink.clone();
-        // `tokio::spawn`, not `tauri::async_runtime::spawn` (step 7 signature
-        // prep, see notes/core-split-plan.md): this fn now lives in core,
+        // `tokio::spawn`, not `tauri::async_runtime::spawn` (the Tauri/core
+        // split; see AGENTS.md, "Architecture"): this fn now lives in core,
         // which has no Tauri runtime to reach for. Same underlying Tokio
         // runtime either way — the app's Tauri build already runs on one, and
         // this spawn only needs to outlive the calling command, not the
@@ -469,46 +468,13 @@ pub async fn add_instance(
     Ok(())
 }
 
-// pub async fn download_and_run_openmw_wizard(
-//     state: State<'_, Mutex<AppState>>,
-// ) -> Result<(), String> {
-//     // Use const release id to call github_getters::download_and_extract_release_zip_by_id_to_path
-//     // Use the root path + "Base TES3MP" to create the path for the extracted files
-//     // once extracted run openmw-wizard.exe
-//     // once openmw-wizard.exe is done, return Ok(())
-//     // if any error occurs, return Err(String::from("Failed to download and run openmw-wizard"))
-//     let root_path = state
-//         .lock()
-//         .unwrap()
-//         .nerevar_config
-//         .root_path
-//         .clone()
-//         .ok_or_else(|| "Root path not set".to_string())?;
-//     let base_tes3mp_path = Path::new(&root_path).join("Base TES3MP");
-//     std::fs::create_dir_all(&base_tes3mp_path).map_err(|e| e.to_string())?;
-//     github_getters::download_and_extract_release_zip_by_id_to_path(
-//         TES3MP_081_RELEASE_ID.to_string(),
-//         base_tes3mp_path.to_string_lossy().into_owned(),
-//     )
-//     .await?;
-//     let openmw_wizard_path = base_tes3mp_path.join("openmw-wizard.exe");
-//     if !openmw_wizard_path.exists() {
-//         return Err(String::from("Failed to download and run openmw-wizard"));
-//     }
-//     let mut result = std::process::Command::new(openmw_wizard_path)
-//         .spawn()
-//         .map_err(|e| e.to_string())?;
-//     let status = result.wait().map_err(|e| e.to_string())?;
-//     if !status.success() {
-//         return Err(String::from("Failed to run openmw-wizard"));
-//     }
-//     Ok(())
-// }
-
 pub async fn validate_global_openmw_config() -> Result<bool, String> {
     crate::openmw_ini_importer::validate_nerevar_openmw_scaffold()
 }
 
+/// Writes the global OpenMW scaffold from a Morrowind installation the user
+/// pointed at during onboarding. (Idea never built: fetch a TES3MP release and
+/// run its bundled `openmw-wizard` to derive this instead of asking for a path.)
 pub async fn generate_default_global_openmw_config(
     morrowind_installation_path: String,
 ) -> Result<(), String> {
