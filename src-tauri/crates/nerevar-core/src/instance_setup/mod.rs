@@ -7,7 +7,9 @@ pub use required_data_files::{
 // Runtime inspection (`runtime::inspect`) locates the same pieces these
 // modules already know how to find; it reuses their finders rather than
 // growing a second set that could drift from them.
-pub(crate) use required_data_files::{find_tes3mp_server_data_dir, openmw_runtime_version};
+pub(crate) use required_data_files::{
+    find_tes3mp_server_data_dir, openmw_runtime_version, parse_openmw_version,
+};
 pub(crate) use server_cfg::{find_client_defaults_cfg, find_server_defaults_cfg};
 pub use server_cfg::{
     apply_server_defaults, create_instance_data_dir, instance_tes3mp_dir, INSTANCE_TES3MP_DIR,

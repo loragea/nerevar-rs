@@ -164,7 +164,7 @@ The dashboard is the home screen after setup:
 - **Settings** — Nerevar-wide options such as sync port.
 - **MO2 plugin** — workflow for exporting a Mod Organizer 2 mod list into Nerevar.
 
-Each instance keeps its own TES3MP copy, data directory, and OpenMW launch configuration so different servers never overwrite each other.
+Each instance keeps its own TES3MP copy, data directory, and OpenMW launch configuration so different servers never overwrite each other. When you create an instance you choose where that TES3MP build comes from — a GitHub release Nerevar downloads for you, a folder you already have unpacked, or a release archive on disk. Nerevar copies or extracts it into the instance either way; nothing is run from the original location.
 
 ---
 

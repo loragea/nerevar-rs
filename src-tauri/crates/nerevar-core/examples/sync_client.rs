@@ -13,8 +13,15 @@
 //! ```text
 //! cargo run -p nerevar-core --example sync_client -- \
 //!     --config <nerevar config.json> --instance <id or name> \
-//!     [--force] [--launch] [--onboard <Morrowind Data Files dir>]
+//!     [--install-runtime] [--force] [--launch]
+//!     [--onboard <Morrowind Data Files dir>]
 //!
+//!   --install-runtime
+//!               install the instance's configured TES3MP runtime into
+//!               <instance>/tes3mp/ before syncing, if that directory is not
+//!               already populated. This is what the desktop's create flow
+//!               does; the driver does it separately because it is handed an
+//!               instance that already exists in a config.json
 //!   --force     re-download every file instead of resuming from sync-state
 //!   --launch    after a valid sync, launch the instance's TES3MP client and
 //!               block until it exits or this process gets SIGTERM/SIGINT
@@ -47,14 +54,16 @@ use std::time::Duration;
 use nerevar_core::config::{generate_default_global_openmw_config, load_nerevar_config_at};
 use nerevar_core::data::{InstanceConfig, NerevarConfig};
 use nerevar_core::instance_data::{load_manifest, resolve_package_data_dir};
+use nerevar_core::instance_setup::instance_tes3mp_dir;
 use nerevar_core::process_manager::{launch_tes3mp_client, ProcessManager, ProcessRole};
 use nerevar_core::reporter::EventSink;
+use nerevar_core::runtime::{self, TargetPlatform};
 use nerevar_core::sync_client::{
     sync_if_needed, touch_last_synced, write_synced_client_connection, SyncCoordinator,
 };
 
 const USAGE: &str = "usage: sync_client --config <config.json> --instance <id-or-name> \
-[--force] [--launch] [--onboard <Morrowind Data Files dir>]";
+[--install-runtime] [--force] [--launch] [--onboard <Morrowind Data Files dir>]";
 
 /// How long to wait for the exit watcher's `process-status` after the client
 /// is gone before giving up on its exit code.
@@ -65,6 +74,7 @@ struct Args {
     instance: String,
     force: bool,
     launch: bool,
+    install_runtime: bool,
     onboard: Option<PathBuf>,
 }
 
@@ -73,6 +83,7 @@ fn parse_args() -> Result<Args, String> {
     let mut instance = None;
     let mut force = false;
     let mut launch = false;
+    let mut install_runtime = false;
     let mut onboard = None;
 
     let mut args = std::env::args().skip(1);
@@ -83,6 +94,7 @@ fn parse_args() -> Result<Args, String> {
             "--onboard" => onboard = Some(PathBuf::from(value_of(&mut args, "--onboard")?)),
             "--force" => force = true,
             "--launch" => launch = true,
+            "--install-runtime" => install_runtime = true,
             "-h" | "--help" => {
                 println!("{USAGE}");
                 std::process::exit(0);
@@ -96,6 +108,7 @@ fn parse_args() -> Result<Args, String> {
         instance: instance.ok_or_else(|| format!("--instance is required\n{USAGE}"))?,
         force,
         launch,
+        install_runtime,
         onboard,
     })
 }
@@ -208,6 +221,39 @@ fn persist_synced_instance(
     .map_err(|e| format!("Failed to write {}: {e}", config_path.display()))
 }
 
+/// Installs the instance's configured TES3MP runtime into `<instance>/tes3mp/`
+/// through `runtime::acquire` — the same call the desktop's create flow makes.
+///
+/// Skipped when that directory already holds a complete runtime: this driver
+/// is pointed at an instance that may already be installed, and re-installing
+/// over a live tree would clobber the cfgs Nerevar has patched. "Complete"
+/// rather than "non-empty" is the test because the wrapper's own profile
+/// directory can exist beside a runtime that was never installed.
+async fn install_runtime(instance: &InstanceConfig, sink: Arc<dyn EventSink>) -> Result<(), String> {
+    let source = instance.runtime.as_ref().ok_or_else(|| {
+        format!(
+            "Instance {} records no runtime source, so there is nothing to install",
+            instance.id
+        )
+    })?;
+
+    let tes3mp_dir = instance_tes3mp_dir(Path::new(&instance.path));
+    let installed = runtime::inspect(&tes3mp_dir)
+        .map(|info| info.require_complete().is_ok())
+        .unwrap_or(false);
+    if installed {
+        log::info!(
+            "TES3MP runtime already installed at {} — skipping",
+            tes3mp_dir.display()
+        );
+        return Ok(());
+    }
+
+    let info = runtime::acquire(source, &tes3mp_dir, TargetPlatform::current(), sink, None).await?;
+    info.require_complete()?;
+    Ok(())
+}
+
 #[cfg(unix)]
 async fn wait_for_shutdown_signal() {
     use tokio::signal::unix::{signal, SignalKind};
@@ -244,6 +290,10 @@ async fn run(args: Args) -> Result<i32, String> {
     let (exit_tx, mut exit_rx) = tokio::sync::mpsc::unbounded_channel::<Option<i32>>();
     let sink: Arc<dyn EventSink> = Arc::new(JsonLinesSink::new(exit_tx));
     let coordinator = Arc::new(SyncCoordinator::new());
+
+    if args.install_runtime {
+        install_runtime(&instance, sink.clone()).await?;
+    }
 
     let validation = sync_if_needed(sink.clone(), coordinator, &instance, args.force).await?;
     print_event(

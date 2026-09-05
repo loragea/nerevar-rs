@@ -23,6 +23,7 @@ pub enum BackgroundOperationPhase {
     WritingManifest,
     WritingLaunchCfg,
     DownloadingRuntime,
+    CopyingRuntime,
     ExtractingRuntime,
     InspectingRuntime,
     Complete,
@@ -94,6 +95,7 @@ impl ProgressEmitter {
             BackgroundOperationPhase::HashingFiles
                 | BackgroundOperationPhase::ScanningPackages
                 | BackgroundOperationPhase::DownloadingRuntime
+                | BackgroundOperationPhase::CopyingRuntime
                 | BackgroundOperationPhase::ExtractingRuntime
         ) {
             return false;
