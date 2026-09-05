@@ -55,6 +55,7 @@ pub(crate) use nerevar_core::AppState;
 use crate::data::GithubReleaseResponse;
 use crate::data::NerevarConfig;
 use crate::data::NewInstanceConfig;
+use nerevar_core::runtime::{RuntimeInspection, RuntimeSource};
 use crate::process_manager::ProcessManager;
 use crate::reporter::{EventSink, TauriEventSink};
 use crate::sync_client::SyncCoordinator;
@@ -121,6 +122,24 @@ fn open_esm_file_picker() -> Result<String, String> {
 }
 
 #[tauri::command]
+fn pick_runtime_directory() -> Result<String, String> {
+    file_actions::open_runtime_directory_picker().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn pick_runtime_archive() -> Result<String, String> {
+    file_actions::open_runtime_archive_picker().map_err(|e| e.to_string())
+}
+
+/// What a runtime source would install, checked before installing it — so a
+/// local pick is validated in the create form instead of failing the create.
+/// A `githubRelease` errors: nothing of it is on disk to look at yet.
+#[tauri::command]
+fn inspect_runtime_source(source: RuntimeSource) -> Result<RuntimeInspection, String> {
+    nerevar_core::runtime::inspect_source(&source)
+}
+
+#[tauri::command]
 fn open_directory(path: String) -> Result<(), String> {
     file_actions::open_directory(path.to_string()).map_err(|e| e.to_string())
 }
@@ -143,8 +162,9 @@ async fn set_sync_port(state: State<'_, Mutex<AppState>>, port: i32) -> Result<(
 async fn add_instance(
     state: State<'_, Mutex<AppState>>,
     new_instance: NewInstanceConfig,
+    operation_id: Option<String>,
 ) -> Result<(), String> {
-    config::add_instance(state.inner(), new_instance).await
+    config::add_instance(state.inner(), new_instance, operation_id).await
 }
 
 // #[tauri::command]
@@ -284,6 +304,9 @@ pub fn run() {
             open_directory_picker,
             open_csv_file_picker,
             open_esm_file_picker,
+            pick_runtime_directory,
+            pick_runtime_archive,
+            inspect_runtime_source,
             open_directory,
             set_root_path,
             set_sync_port,

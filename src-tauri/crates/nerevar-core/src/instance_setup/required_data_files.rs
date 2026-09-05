@@ -144,7 +144,7 @@ pub(crate) fn openmw_runtime_version(tes3mp_dir: &Path) -> Option<(u32, u32)> {
     parse_openmw_version(&contents)
 }
 
-fn parse_openmw_version(contents: &str) -> Option<(u32, u32)> {
+pub(crate) fn parse_openmw_version(contents: &str) -> Option<(u32, u32)> {
     let line = contents.lines().next()?.trim();
     let mut parts = line.split('.');
     let major = parts.next()?.parse().ok()?;

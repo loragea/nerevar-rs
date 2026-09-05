@@ -4,10 +4,15 @@
  * Where the TES3MP runtime for an instance is fetched from.
  *
  * Serialized as an internally tagged enum (`{"kind": "githubRelease", ...}`)
- * so later variants — `localDirectory { path }`, `archive { path }` — can be
- * added without touching config files already on disk: an old file only ever
- * holds `githubRelease`, and a reader that predates a variant simply fails on
- * that one instance rather than on the whole config.
+ * so a new variant never disturbs config files already on disk: a file
+ * written before `localDirectory`/`archive` existed only ever holds
+ * `githubRelease`, and a reader that predates a variant fails on that one
+ * instance rather than on the whole config.
+ *
+ * Every variant installs *into* the instance's `tes3mp/` directory. Nothing
+ * is ever run in place: Nerevar patches the cfgs and `requiredDataFiles.json`
+ * inside the install and deletes it with the instance, so a local directory
+ * or archive is a template to copy from, not a runtime to borrow.
  */
 export type RuntimeSource = { "kind": "githubRelease", 
 /**
@@ -29,4 +34,14 @@ tag: string,
  * platform rules pick", which is what the app sends: the selection
  * rules live in core, not in the picker.
  */
-assetName: string, };
+assetName: string, } | { "kind": "localDirectory", 
+/**
+ * Absolute path to the runtime root (the directory holding the
+ * `tes3mp` wrapper, or one holding the release's own top-level
+ * directory — inspection recurses either way).
+ */
+path: string, } | { "kind": "archive", 
+/**
+ * Absolute path to the archive file.
+ */
+path: string, };

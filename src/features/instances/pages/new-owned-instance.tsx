@@ -12,13 +12,14 @@ import {
   newInstanceSchema,
   type NewInstanceFormValues,
 } from "@/features/instances/schemas/new-instance-schema";
-import { ReleaseSelector } from "@/features/tes3mp-releases/components/release-selector";
+import { RuntimeSourceField } from "@/features/instances/components/runtime-source-field";
+import { useBackgroundOperation } from "@/features/instances/context/background-operation-context";
 import { cn } from "@/lib/utils";
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ArrowLeft, Loader2, Sparkles } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Controller, useForm, type FieldErrors } from "react-hook-form";
 import { toast } from "sonner";
 import { navigate } from "wouter/use-browser-location";
@@ -118,6 +119,10 @@ function buildInstanceDataDir(rootPath: string, instanceName: string): string {
 
 export function NewInstancePage() {
   const config = useConfig();
+  const { runOperation } = useBackgroundOperation();
+  // A local runtime the backend would reject: the submit stays disabled
+  // rather than letting the create fail after the copy.
+  const [runtimeBlocked, setRuntimeBlocked] = useState(false);
 
   const form = useForm<NewInstanceFormValues>({
     resolver: standardSchemaResolver(newInstanceSchema),
@@ -158,19 +163,31 @@ export function NewInstancePage() {
 
   const onSubmit = async (data: NewInstanceFormValues) => {
     try {
-      await invoke<void>("add_instance", {
-        newInstance: {
-          runtime: data.runtime,
-          instanceName: data.instanceName,
-          instanceDescription: data.instanceDescription,
-          instanceRootPath: data.instanceRootPath,
-          instanceDataDir: data.instanceDataDir,
-          serverHostName: data.serverHostName,
-          maxPlayers: data.maxPlayers,
-          serverPort: data.serverPort,
-          password: data.password,
-          masterServerEnabled: data.masterServerEnabled,
-        } as NewInstanceConfig,
+      // Through `runOperation` so the runtime install's progress events —
+      // download, copy, extract — land on the banner: the create mints the
+      // operation id here and hands it to the command, which forwards it to
+      // `runtime::acquire`.
+      await runOperation({
+        instanceId: "",
+        instanceName: data.instanceName,
+        kind: "createInstance",
+        detail: "Installing the TES3MP runtime",
+        task: (operationId) =>
+          invoke<void>("add_instance", {
+            newInstance: {
+              runtime: data.runtime,
+              instanceName: data.instanceName,
+              instanceDescription: data.instanceDescription,
+              instanceRootPath: data.instanceRootPath,
+              instanceDataDir: data.instanceDataDir,
+              serverHostName: data.serverHostName,
+              maxPlayers: data.maxPlayers,
+              serverPort: data.serverPort,
+              password: data.password,
+              masterServerEnabled: data.masterServerEnabled,
+            } as NewInstanceConfig,
+            operationId,
+          }),
       });
     } catch (error) {
       toast.error(
@@ -216,14 +233,16 @@ export function NewInstancePage() {
               render={({ field, fieldState }) => (
                 <InstanceFormField
                   id="new-instance-release"
-                  label="TES3MP Release"
-                  description="This is the version of TES3MP that will be used for this instance. The latest non-VR release TES3MP 0.8.1 is the only supported release currently. I don't really plan on supporting older releases."
+                  label="TES3MP Runtime"
+                  description="Where this instance's TES3MP build comes from. A GitHub release is downloaded for you — the latest non-VR release TES3MP 0.8.1 is the only supported one. You can also point Nerevar at an install you already have, or at a release archive on disk; either is copied into this instance."
                   invalid={fieldState.invalid}
                   error={fieldState.error}
                 >
-                  <ReleaseSelector
+                  <RuntimeSourceField
                     value={field.value}
                     onValueChange={field.onChange}
+                    disabled={isSubmitting}
+                    onBlockingChange={setRuntimeBlocked}
                   />
                 </InstanceFormField>
               )}
@@ -497,7 +516,7 @@ export function NewInstancePage() {
               variant="server"
               size="lg"
               className="h-16 w-full text-xl"
-              disabled={isSubmitting}
+              disabled={isSubmitting || runtimeBlocked}
             >
               {isSubmitting ? "Creating Instance..." : "Create Instance"}
               {isSubmitting ? (

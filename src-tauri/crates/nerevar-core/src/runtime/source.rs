@@ -13,10 +13,15 @@ pub const DEFAULT_TES3MP_REPO: &str = "tes3mp/tes3mp";
 /// Where the TES3MP runtime for an instance is fetched from.
 ///
 /// Serialized as an internally tagged enum (`{"kind": "githubRelease", ...}`)
-/// so later variants — `localDirectory { path }`, `archive { path }` — can be
-/// added without touching config files already on disk: an old file only ever
-/// holds `githubRelease`, and a reader that predates a variant simply fails on
-/// that one instance rather than on the whole config.
+/// so a new variant never disturbs config files already on disk: a file
+/// written before `localDirectory`/`archive` existed only ever holds
+/// `githubRelease`, and a reader that predates a variant fails on that one
+/// instance rather than on the whole config.
+///
+/// Every variant installs *into* the instance's `tes3mp/` directory. Nothing
+/// is ever run in place: Nerevar patches the cfgs and `requiredDataFiles.json`
+/// inside the install and deletes it with the instance, so a local directory
+/// or archive is a template to copy from, not a runtime to borrow.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 #[ts(export)]
@@ -39,6 +44,23 @@ pub enum RuntimeSource {
         #[serde(default)]
         asset_name: String,
     },
+    /// A TES3MP install the user already has unpacked somewhere — an
+    /// extracted official release, or a fork build such as MundusPatensMP.
+    /// Its contents are copied into the instance's `tes3mp/`.
+    #[serde(rename_all = "camelCase")]
+    LocalDirectory {
+        /// Absolute path to the runtime root (the directory holding the
+        /// `tes3mp` wrapper, or one holding the release's own top-level
+        /// directory — inspection recurses either way).
+        path: String,
+    },
+    /// A release archive sitting on disk: `.zip`, `.tar.gz` or `.tgz`,
+    /// extracted into the instance's `tes3mp/`.
+    #[serde(rename_all = "camelCase")]
+    Archive {
+        /// Absolute path to the archive file.
+        path: String,
+    },
 }
 
 impl RuntimeSource {
@@ -60,6 +82,10 @@ impl RuntimeSource {
     pub fn legacy_release_id(&self) -> Option<String> {
         match self {
             RuntimeSource::GithubRelease { release_id, .. } => Some(release_id.clone()),
+            // A local source has no release id to record; an older build
+            // reading such a config sees no `releaseId` and treats the
+            // instance as one it cannot reinstall, which is the truth.
+            RuntimeSource::LocalDirectory { .. } | RuntimeSource::Archive { .. } => None,
         }
     }
 }
@@ -135,8 +161,65 @@ mod tests {
     #[test]
     fn unknown_kind_is_rejected_rather_than_silently_defaulted() {
         let result: Result<RuntimeSource, _> =
-            serde_json::from_str(r#"{"kind":"localDirectory","path":"/opt/tes3mp"}"#);
+            serde_json::from_str(r#"{"kind":"carrierPigeon","path":"/opt/tes3mp"}"#);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn local_directory_and_archive_round_trip_through_json() {
+        for (source, kind) in [
+            (
+                RuntimeSource::LocalDirectory {
+                    path: "/opt/MundusPatensMP".to_string(),
+                },
+                "localDirectory",
+            ),
+            (
+                RuntimeSource::Archive {
+                    path: "/downloads/tes3mp-0.8.1.tar.gz".to_string(),
+                },
+                "archive",
+            ),
+        ] {
+            let json = serde_json::to_value(&source).expect("serialize");
+            assert_eq!(json["kind"], kind);
+            assert!(json["path"].is_string());
+            let back: RuntimeSource = serde_json::from_value(json).expect("deserialize");
+            assert_eq!(back, source);
+        }
+    }
+
+    /// The reason the enum is tagged: a config written before the local
+    /// variants existed still loads, unchanged, into this build.
+    #[test]
+    fn a_pre_local_variant_config_still_loads() {
+        let source: RuntimeSource = serde_json::from_str(
+            r#"{"kind":"githubRelease","repo":"tes3mp/tes3mp","releaseId":"65767406",
+                "tag":"tes3mp-0.8.1","assetName":""}"#,
+        )
+        .expect("deserialize");
+
+        assert!(matches!(source, RuntimeSource::GithubRelease { .. }));
+        assert_eq!(source.legacy_release_id().as_deref(), Some("65767406"));
+    }
+
+    /// Only a GitHub release maps back onto the legacy `releaseId` field.
+    #[test]
+    fn local_sources_have_no_legacy_release_id() {
+        assert_eq!(
+            RuntimeSource::LocalDirectory {
+                path: "/opt/tes3mp".to_string()
+            }
+            .legacy_release_id(),
+            None
+        );
+        assert_eq!(
+            RuntimeSource::Archive {
+                path: "/opt/tes3mp.zip".to_string()
+            }
+            .legacy_release_id(),
+            None
+        );
     }
 
     #[test]

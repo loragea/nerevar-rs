@@ -15,7 +15,9 @@ export type BackgroundOperationKind =
   | "importMo2Modlist"
   | "saveLoadOrder"
   | "writeLaunchCfg"
-  | "hostManifest";
+  | "hostManifest"
+  | "createInstance"
+  | "createConnection";
 
 export type BackgroundOperationStatus = "running" | "success" | "error";
 
@@ -45,6 +47,8 @@ const OPERATION_LABELS: Record<BackgroundOperationKind, string> = {
   saveLoadOrder: "Saving load order",
   writeLaunchCfg: "Writing launch config",
   hostManifest: "Building sync manifest",
+  createInstance: "Creating instance",
+  createConnection: "Creating connection",
 };
 
 type RunOperationOptions<T> = {

@@ -51,10 +51,17 @@ pub async fn fetch_remote_manifest_summary(
     .await
 }
 
+/// Creates a synced instance for a remote host: instance tree, TES3MP
+/// runtime, client cfg pointed at the host, then the config entry.
+///
+/// `operation_id` is the frontend's background-operation id when the create
+/// was started from the app, so the runtime install's progress lands on the
+/// banner the user is already looking at; `None` lets core mint one.
 #[tauri::command]
 pub async fn add_synced_connection(
     state: State<'_, Mutex<AppState>>,
     new_connection: NewConnectionConfig,
+    operation_id: Option<String>,
 ) -> Result<String, String> {
     let instance_root = Path::new(&new_connection.instance_root_path);
     if instance_root.exists() {
@@ -98,6 +105,7 @@ pub async fn add_synced_connection(
             &tes3mp_dir,
             TargetPlatform::current(),
             runtime_sink.clone(),
+            operation_id.clone(),
         )
         .await?;
         installed.require_complete()?;

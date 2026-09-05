@@ -9,9 +9,17 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
 use crate::instance_setup::{find_client_defaults_cfg, find_server_defaults_cfg};
-use crate::instance_setup::{find_tes3mp_server_data_dir, openmw_runtime_version};
+use crate::instance_setup::{
+    find_tes3mp_server_data_dir, openmw_runtime_version, parse_openmw_version,
+};
 use crate::process_manager::spawn::{find_executable, CLIENT_EXE_NAMES, SERVER_EXE_NAMES};
+
+use super::acquire::{detect_archive_format, ArchiveFormat};
+use super::source::RuntimeSource;
 
 /// How deep under the runtime root the pieces are searched for. The same
 /// depths the individual finders already used from their own call sites, so
@@ -76,6 +84,43 @@ impl RuntimeInfo {
             None => "unknown".to_string(),
         }
     }
+
+    /// The parts of an inspection a UI shows: enough to tell the user whether
+    /// the thing they picked is a runtime, without handing them absolute
+    /// paths they did not ask about.
+    pub fn summary(&self) -> RuntimeInspection {
+        RuntimeInspection {
+            root: self.root.to_string_lossy().into_owned(),
+            version_display: self.version_display(),
+            has_client_exe: self.client_exe.is_some(),
+            has_server_exe: self.server_exe.is_some(),
+            missing: self.missing_required(),
+            warnings: self.warnings.clone(),
+        }
+    }
+}
+
+/// What the UI renders for a runtime source it can check before installing.
+///
+/// `missing` empty is the whole test: a source with nothing missing installs,
+/// one with entries listed there is not a TES3MP runtime and the create form
+/// stays invalid until the user picks something else.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RuntimeInspection {
+    /// What was inspected: the directory, or the archive file.
+    pub root: String,
+    /// `0.48`-style engine version, or `unknown`.
+    pub version_display: String,
+    pub has_client_exe: bool,
+    pub has_server_exe: bool,
+    /// Required pieces that are absent, named the way a user would recognize
+    /// them. Empty means the source is usable.
+    pub missing: Vec<String>,
+    /// Non-fatal observations — a server-only build, an unknown engine
+    /// version.
+    pub warnings: Vec<String>,
 }
 
 /// Locates the pieces of the TES3MP runtime installed under `dir`.
@@ -95,22 +140,12 @@ pub fn inspect(dir: &Path) -> Result<RuntimeInfo, String> {
     let server_data_dir = find_tes3mp_server_data_dir(dir).ok();
     let openmw_version = openmw_runtime_version(dir);
 
-    let mut warnings = Vec::new();
-    if openmw_version.is_none() {
-        warnings.push(format!(
-            "No resources/version under {} — the engine version is unknown, so the \
-             required-plugin list falls back to probing the install",
-            dir.display()
-        ));
-    }
-    if client_exe.is_none() && server_exe.is_some() {
-        warnings
-            .push("No TES3MP client executable — this runtime can host but not play".to_string());
-    }
-    if server_exe.is_none() && client_exe.is_some() {
-        warnings
-            .push("No tes3mp-server executable — this runtime can play but not host".to_string());
-    }
+    let warnings = runtime_warnings(
+        &dir.display().to_string(),
+        client_exe.is_some(),
+        server_exe.is_some(),
+        openmw_version.is_some(),
+    );
 
     Ok(RuntimeInfo {
         root: dir.to_path_buf(),
@@ -122,6 +157,198 @@ pub fn inspect(dir: &Path) -> Result<RuntimeInfo, String> {
         openmw_version,
         warnings,
     })
+}
+
+/// The non-fatal observations both inspections make, from the same facts, so
+/// a directory and an archive of that directory read identically.
+fn runtime_warnings(
+    label: &str,
+    has_client_exe: bool,
+    has_server_exe: bool,
+    has_version: bool,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if !has_version {
+        warnings.push(format!(
+            "No resources/version under {label} — the engine version is unknown, so the \
+             required-plugin list falls back to probing the install"
+        ));
+    }
+    if !has_client_exe && has_server_exe {
+        warnings
+            .push("No TES3MP client executable — this runtime can host but not play".to_string());
+    }
+    if !has_server_exe && has_client_exe {
+        warnings
+            .push("No tes3mp-server executable — this runtime can play but not host".to_string());
+    }
+    warnings
+}
+
+/// What `source` would install, checked before installing it.
+///
+/// A `githubRelease` is the one source that cannot be checked in advance —
+/// nothing of it is on disk until it is downloaded — so it is an error rather
+/// than an empty answer that a caller might read as "fine".
+pub fn inspect_source(source: &RuntimeSource) -> Result<RuntimeInspection, String> {
+    match source {
+        RuntimeSource::GithubRelease { .. } => Err(
+            "A GitHub release is inspected after it downloads — there is nothing on disk to \
+             check yet"
+                .to_string(),
+        ),
+        RuntimeSource::LocalDirectory { path } => Ok(inspect(Path::new(path))?.summary()),
+        RuntimeSource::Archive { path } => Ok(inspect_archive(Path::new(path))?.summary()),
+    }
+}
+
+/// Locates the pieces of a TES3MP runtime inside an archive, from its entry
+/// names, without extracting it.
+///
+/// The paths in the returned `RuntimeInfo` are entry names, not files on
+/// disk — this answers "would extracting this give a runtime?", which is what
+/// a user needs before committing to a 90MB extraction.
+pub fn inspect_archive(archive: &Path) -> Result<RuntimeInfo, String> {
+    if !archive.is_file() {
+        return Err(format!("No archive at {}", archive.display()));
+    }
+
+    let mut scan = ArchiveScan::default();
+    match detect_archive_format(archive)? {
+        ArchiveFormat::Zip => scan_zip(archive, &mut scan)?,
+        ArchiveFormat::TarGz => scan_tar_gz(archive, &mut scan)?,
+    }
+    Ok(scan.into_info(archive))
+}
+
+/// The pieces `inspect` looks for, spotted by entry name.
+#[derive(Default)]
+struct ArchiveScan {
+    client_exe: Option<PathBuf>,
+    server_exe: Option<PathBuf>,
+    client_cfg: Option<PathBuf>,
+    server_cfg: Option<PathBuf>,
+    server_data_dir: Option<PathBuf>,
+    openmw_version: Option<(u32, u32)>,
+}
+
+impl ArchiveScan {
+    /// `true` when this entry's *contents* are wanted (`resources/version`),
+    /// so the caller reads only the one entry it has to.
+    fn note(&mut self, raw_name: &str) -> bool {
+        let name = raw_name.replace('\\', "/");
+        let trimmed = name.trim_end_matches('/');
+        let base = trimmed.rsplit('/').next().unwrap_or(trimmed);
+
+        if self.client_exe.is_none() && CLIENT_EXE_NAMES.contains(&base) {
+            self.client_exe = Some(PathBuf::from(trimmed));
+        }
+        if self.server_exe.is_none() && SERVER_EXE_NAMES.contains(&base) {
+            self.server_exe = Some(PathBuf::from(trimmed));
+        }
+        if self.client_cfg.is_none() && base == "tes3mp-client-default.cfg" {
+            self.client_cfg = Some(PathBuf::from(trimmed));
+        }
+        if self.server_cfg.is_none() && base == "tes3mp-server-default.cfg" {
+            self.server_cfg = Some(PathBuf::from(trimmed));
+        }
+        if self.server_data_dir.is_none() && is_under(trimmed, "server/data") {
+            self.server_data_dir = Some(PathBuf::from("server/data"));
+        }
+        self.openmw_version.is_none() && is_under(trimmed, "resources/version")
+    }
+
+    fn read_version(&mut self, contents: &str) {
+        self.openmw_version = parse_openmw_version(contents);
+    }
+
+    fn into_info(self, archive: &Path) -> RuntimeInfo {
+        let warnings = runtime_warnings(
+            &archive.display().to_string(),
+            self.client_exe.is_some(),
+            self.server_exe.is_some(),
+            self.openmw_version.is_some(),
+        );
+        RuntimeInfo {
+            root: archive.to_path_buf(),
+            client_exe: self.client_exe,
+            server_exe: self.server_exe,
+            client_cfg: self.client_cfg,
+            server_cfg: self.server_cfg,
+            server_data_dir: self.server_data_dir,
+            openmw_version: self.openmw_version,
+            warnings,
+        }
+    }
+}
+
+/// Whether the entry `name` is `suffix` itself or sits beneath it, at any
+/// depth of leading directories — archives wrap the install in a top-level
+/// directory (`TES3MP/`) about half the time.
+fn is_under(name: &str, suffix: &str) -> bool {
+    name == suffix
+        || name.starts_with(&format!("{suffix}/"))
+        || name.ends_with(&format!("/{suffix}"))
+        || name.contains(&format!("/{suffix}/"))
+}
+
+fn scan_zip(archive: &Path, scan: &mut ArchiveScan) -> Result<(), String> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(archive)
+        .map_err(|e| format!("Failed to open {}: {e}", archive.display()))?;
+    let mut zip = zip::ZipArchive::new(std::io::BufReader::new(file))
+        .map_err(|e| format!("Failed to read {}: {e}", archive.display()))?;
+
+    // The central directory carries every name, so the whole scan happens
+    // without decompressing anything; only `resources/version` is read.
+    let names: Vec<String> = zip.file_names().map(|n| n.to_string()).collect();
+
+    let mut version_entry = None;
+    for name in &names {
+        if scan.note(name) {
+            version_entry = Some(name.clone());
+        }
+    }
+
+    if let Some(name) = version_entry {
+        if let Ok(mut entry) = zip.by_name(&name) {
+            let mut contents = String::new();
+            if entry.read_to_string(&mut contents).is_ok() {
+                scan.read_version(&contents);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn scan_tar_gz(archive: &Path, scan: &mut ArchiveScan) -> Result<(), String> {
+    use flate2::read::GzDecoder;
+    use std::io::Read;
+
+    let file = std::fs::File::open(archive)
+        .map_err(|e| format!("Failed to open {}: {e}", archive.display()))?;
+    let mut tar = tar::Archive::new(GzDecoder::new(std::io::BufReader::new(file)));
+    let entries = tar
+        .entries()
+        .map_err(|e| format!("Failed to read {}: {e}", archive.display()))?;
+
+    for entry in entries {
+        let mut entry =
+            entry.map_err(|e| format!("Failed to read {}: {e}", archive.display()))?;
+        let name = entry
+            .path()
+            .map_err(|e| format!("Failed to read {}: {e}", archive.display()))?
+            .to_string_lossy()
+            .into_owned();
+        if scan.note(&name) {
+            let mut contents = String::new();
+            if entry.read_to_string(&mut contents).is_ok() {
+                scan.read_version(&contents);
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -243,6 +470,101 @@ mod tests {
             .missing_required()
             .iter()
             .any(|m| m.contains("TES3MP executable")));
+    }
+
+    #[test]
+    fn a_summary_reports_what_the_ui_needs() {
+        let scratch = synthetic_runtime("summary");
+        let summary = inspect(&scratch.0).expect("inspect").summary();
+
+        assert_eq!(summary.version_display, "0.48");
+        assert!(summary.has_client_exe);
+        assert!(summary.has_server_exe);
+        assert!(summary.missing.is_empty());
+        assert!(summary.warnings.is_empty());
+        assert_eq!(summary.root, scratch.0.to_string_lossy());
+    }
+
+    /// A zip of a synthetic runtime inspects to the same verdict the
+    /// extracted directory would — from entry names alone, nothing unpacked.
+    #[test]
+    fn an_archive_inspects_from_its_entry_names() {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+
+        let scratch = synthetic_runtime("archive-inspect");
+        let archive = scratch.0.join("release.zip");
+        {
+            let mut writer = zip::ZipWriter::new(fs::File::create(&archive).unwrap());
+            for entry in [
+                format!("TES3MP/{}", exe_name("tes3mp")),
+                format!("TES3MP/{}", exe_name("tes3mp-server")),
+                "TES3MP/tes3mp-client-default.cfg".to_string(),
+                "TES3MP/tes3mp-server-default.cfg".to_string(),
+                "TES3MP/server/data/placeholder".to_string(),
+            ] {
+                writer
+                    .start_file(entry, SimpleFileOptions::default())
+                    .unwrap();
+                writer.write_all(b"x").unwrap();
+            }
+            writer
+                .start_file("TES3MP/resources/version", SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(b"0.48.0\n7f9b\n").unwrap();
+            writer.finish().unwrap();
+        }
+
+        let info = inspect_archive(&archive).expect("inspect archive");
+        assert!(info.missing_required().is_empty(), "{:?}", info.missing_required());
+        assert_eq!(info.openmw_version, Some((0, 48)));
+        assert!(info.client_exe.is_some());
+        assert!(info.server_exe.is_some());
+        assert!(info.server_data_dir.is_some());
+    }
+
+    #[test]
+    fn an_archive_of_the_wrong_thing_lists_what_is_missing() {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+
+        let scratch = synthetic_runtime("archive-wrong");
+        let archive = scratch.0.join("mods.zip");
+        {
+            let mut writer = zip::ZipWriter::new(fs::File::create(&archive).unwrap());
+            writer
+                .start_file("SomeMod/mod.esp", SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(b"x").unwrap();
+            writer.finish().unwrap();
+        }
+
+        let info = inspect_archive(&archive).expect("inspect archive");
+        let missing = info.missing_required();
+        assert!(missing.iter().any(|m| m.contains("TES3MP executable")), "{missing:?}");
+        assert!(missing.iter().any(|m| m.contains("server/data")), "{missing:?}");
+        assert!(info.require_complete().is_err());
+    }
+
+    /// The one source that cannot be checked before it installs says so
+    /// rather than answering with an empty summary a caller might read as
+    /// "fine".
+    #[test]
+    fn a_github_release_is_not_inspectable_before_it_downloads() {
+        let err = inspect_source(&RuntimeSource::from_legacy_release_id("65767406"))
+            .expect_err("nothing on disk to inspect");
+        assert!(err.contains("after it downloads"), "{err}");
+    }
+
+    #[test]
+    fn inspect_source_checks_a_local_directory() {
+        let scratch = synthetic_runtime("source-dir");
+        let summary = inspect_source(&RuntimeSource::LocalDirectory {
+            path: scratch.0.to_string_lossy().into_owned(),
+        })
+        .expect("inspect");
+        assert!(summary.missing.is_empty());
+        assert_eq!(summary.version_display, "0.48");
     }
 
     #[test]

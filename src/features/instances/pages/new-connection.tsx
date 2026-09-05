@@ -11,7 +11,8 @@ import {
   type NewConnectionFormValues,
 } from "@/features/instances/schemas/new-connection-schema";
 import { useConfig } from "@/features/config/context/config-context-provider";
-import { ReleaseSelector } from "@/features/tes3mp-releases/components/release-selector";
+import { RuntimeSourceField } from "@/features/instances/components/runtime-source-field";
+import { useBackgroundOperation } from "@/features/instances/context/background-operation-context";
 import { formatByteSize } from "@/lib/format";
 import type { NewConnectionConfig, RemoteManifestSummary } from "@/types";
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
@@ -44,8 +45,12 @@ function buildConnectionDataDir(rootPath: string, name: string): string {
 
 export function NewConnectionPage() {
   const config = useConfig();
+  const { runOperation } = useBackgroundOperation();
   const [testing, setTesting] = useState(false);
   const [creating, setCreating] = useState(false);
+  // A local runtime the backend would reject: the submit stays disabled
+  // rather than letting the create fail after the copy.
+  const [runtimeBlocked, setRuntimeBlocked] = useState(false);
   const [preview, setPreview] = useState<RemoteManifestSummary | null>(null);
   const [syncInstanceId, setSyncInstanceId] = useState("");
 
@@ -122,8 +127,20 @@ export function NewConnectionPage() {
         syncPassword: values.syncPassword,
       };
 
-      const instanceId = await invoke<string>("add_synced_connection", {
-        newConnection: payload,
+      // Through `runOperation` so the runtime install's progress events —
+      // download, copy, extract — land on the banner: the create mints the
+      // operation id here and hands it to the command, which forwards it to
+      // `runtime::acquire`.
+      const instanceId = await runOperation({
+        instanceId: "",
+        instanceName: values.connectionName,
+        kind: "createConnection",
+        detail: "Installing the TES3MP runtime",
+        task: (operationId) =>
+          invoke<string>("add_synced_connection", {
+            newConnection: payload,
+            operationId,
+          }),
       });
       setSyncInstanceId(instanceId);
       toast.success("Connection created — starting initial sync");
@@ -178,15 +195,17 @@ export function NewConnectionPage() {
 
           <form onSubmit={onSubmit} className="flex flex-col gap-5">
             <Field>
-              <FieldLabel className={SECTION_LABEL}>TES3MP release</FieldLabel>
+              <FieldLabel className={SECTION_LABEL}>TES3MP runtime</FieldLabel>
               <Controller
                 control={form.control}
                 name="runtime"
                 render={({ field, fieldState }) => (
                   <>
-                    <ReleaseSelector
+                    <RuntimeSourceField
                       value={field.value}
                       onValueChange={field.onChange}
+                      disabled={busy}
+                      onBlockingChange={setRuntimeBlocked}
                     />
                     {fieldState.error ? (
                       <FieldError errors={[fieldState.error]} />
@@ -334,7 +353,7 @@ export function NewConnectionPage() {
               <Button
                 type="submit"
                 variant="launch"
-                disabled={busy}
+                disabled={busy || runtimeBlocked}
                 className="flex-1"
               >
                 {creating || sync.syncing ? (

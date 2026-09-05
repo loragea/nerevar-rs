@@ -11,6 +11,7 @@ export * from "./SettingValue";
 export * from "./SettingValueType";
 export * from "./Tes3mpGameSettingEntry";
 export * from "./RuntimeSource";
+export * from "./RuntimeInspection";
 export * from "./InstanceConfig";
 export * from "./InstanceConnectionSettings";
 export * from "./InstanceEditPayload";

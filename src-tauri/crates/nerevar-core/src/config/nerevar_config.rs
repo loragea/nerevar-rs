@@ -392,9 +392,16 @@ fn cleanup_failed_instance_root(path: &Path) {
     }
 }
 
+/// Creates an owned instance: instance tree, TES3MP runtime, server defaults,
+/// then the config entry.
+///
+/// `operation_id` is the frontend's background-operation id when the create
+/// was started from the app, so the runtime install's progress lands on the
+/// banner the user is already looking at; `None` lets core mint one.
 pub async fn add_instance(
     state: &Mutex<AppState>,
     new_instance: NewInstanceConfig,
+    operation_id: Option<String>,
 ) -> Result<(), String> {
     let instance_root = Path::new(&new_instance.instance_root_path);
     if instance_root.exists() {
@@ -431,6 +438,7 @@ pub async fn add_instance(
             &tes3mp_dir,
             TargetPlatform::current(),
             sink.clone(),
+            operation_id.clone(),
         )
         .await?;
         installed.require_complete()?;

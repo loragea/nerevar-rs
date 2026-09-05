@@ -19,6 +19,7 @@ const PHASE_LABELS: Record<BackgroundOperationPhase, string> = {
   writingManifest: "Writing manifest",
   writingLaunchCfg: "Writing launch cfg",
   downloadingRuntime: "Downloading TES3MP",
+  copyingRuntime: "Copying TES3MP",
   extractingRuntime: "Extracting TES3MP",
   inspectingRuntime: "Checking TES3MP install",
   complete: "Complete",
