@@ -15,6 +15,13 @@
 /// the other host lifecycle events.
 pub const ADMIN_REQUEST_EVENT: &str = "admin-request";
 
+/// Event name for the line `POST /admin/restart` emits once the TES3MP
+/// dedicated server is back up: who asked, and the pid it came back as. The
+/// audit line every `/admin` request emits ([`ADMIN_REQUEST_EVENT`]) already
+/// records that the call happened and what it answered; this one records the
+/// part only the handler knows.
+pub const ADMIN_RESTART_EVENT: &str = "admin-restart";
+
 /// Event name for the summary `POST /admin/apply` emits once the new manifest
 /// is live: what was installed and removed, and whether a running TES3MP
 /// server is now behind that manifest. The daemon's sink logs it at `info`
@@ -24,6 +31,7 @@ pub const ADMIN_APPLY_EVENT: &str = "admin-apply";
 
 pub mod apply;
 pub mod capability;
+pub mod restart;
 pub mod staging;
 pub mod status;
 pub mod store;
@@ -37,6 +45,9 @@ pub use apply::{
 pub use capability::ROLE_TEST_STATUS_ONLY;
 pub use capability::{
     capabilities_for_role, known_role_names, role_grants, role_is_known, Capability, ROLE_ADMIN,
+};
+pub use restart::{
+    restart_tes3mp_server, RestartMark, RestartOutcome, RestartWindow, ServerRestartState,
 };
 pub use staging::{
     available_package_names, clear_staging, data_package_names, load_pending, pending_path,

@@ -1,6 +1,7 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
+use crate::admin::ServerRestartState;
 use crate::process_manager::ProcessManager;
 use crate::reporter::{EventSink, NullEventSink};
 use crate::sync_host::{SharedHostingManifestCache, SharedSyncHost};
@@ -31,9 +32,17 @@ pub struct ServerContext {
     pub admin_write_lock: Arc<tokio::sync::Mutex<()>>,
     /// Whether a running TES3MP server is enforcing a plugin list older than
     /// the served manifest. Set by an apply that finds the game server up
-    /// (apply deliberately does not restart it); cleared by a restart, which
-    /// is a later milestone. Read by `GET /admin/status`.
+    /// (apply deliberately does not restart it), cleared by a successful
+    /// `POST /admin/restart`. Read by `GET /admin/status`.
     pub tes3mp_plugin_list_stale: Arc<AtomicBool>,
+    /// Shared with whoever supervises the TES3MP dedicated server: it says
+    /// there is one to restart, and it is how an admin-requested stop is told
+    /// apart from a crash. The daemon holds the same `Arc` and its death
+    /// watcher consults it; an embedder that never calls
+    /// [`ServerRestartState::mark_supervising`] gets a `409` from
+    /// `POST /admin/restart`, which is the desktop app and a `--sync-only`
+    /// daemon.
+    pub server_restart: Arc<ServerRestartState>,
 }
 
 impl ServerContext {
@@ -52,6 +61,7 @@ impl ServerContext {
             process_manager: None,
             admin_write_lock: Arc::new(tokio::sync::Mutex::new(())),
             tes3mp_plugin_list_stale: Arc::new(AtomicBool::new(false)),
+            server_restart: Arc::new(ServerRestartState::new()),
         }
     }
 

@@ -22,6 +22,13 @@ instanceName: string | null, loadOrder: AdminLoadOrderSummary | null, manifest: 
  */
 tes3mpServerRunning: boolean | null, 
 /**
+ * RFC 3339 instant the running TES3MP dedicated server was launched, or
+ * `null` when it is not running or the embedder supervises no process. A
+ * restart moves it forward, which is how an admin confirms the game
+ * server really did come back rather than never having stopped.
+ */
+tes3mpServerStartedAt: string | null, 
+/**
  * Staged, not-yet-applied changes, or `null` when nothing is pending.
  * `null` and an object with empty lists would mean the same thing, so
  * only one of them is ever sent: nothing pending is `null`.
