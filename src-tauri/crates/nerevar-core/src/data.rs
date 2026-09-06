@@ -113,6 +113,16 @@ pub struct NerevarConfig {
     pub synced_instances: Option<Vec<InstanceConfig>>,
     pub root_path: Option<String>,
     pub sync_port: i32,
+    /// The Morrowind `Data Files` directory onboarding was pointed at.
+    ///
+    /// Written by `config::nerevar_config::set_morrowind_data_files` when the
+    /// OpenMW scaffold is generated from it, so the path can be re-checked or
+    /// repaired later instead of surviving only as a `data=` line inside
+    /// `openmw.nerevar.cfg`. Absent in every config written before the field
+    /// existed, and omitted again when unset, so an older build reads a config
+    /// this one wrote unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub morrowind_data_files: Option<String>,
 }
 
 // impl Default for NerevarConfig {

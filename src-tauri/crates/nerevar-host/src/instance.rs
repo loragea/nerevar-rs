@@ -87,6 +87,7 @@ mod tests {
             synced_instances: None,
             root_path: None,
             sync_port: 25567,
+            morrowind_data_files: None,
         }
     }
 

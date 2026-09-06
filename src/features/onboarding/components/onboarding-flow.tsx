@@ -11,14 +11,16 @@ import { Label } from "@/components/ui/label";
 import { useConfig } from "@/features/config/context/config-context-provider";
 import { OnboardingGuideStep } from "@/features/onboarding/components/onboarding-guide-step";
 import {
+  EASE,
+  OnboardingProgress,
   OnboardingStepCard,
+  slideVariants,
   StepActions,
 } from "@/features/onboarding/components/onboarding-step-shell";
 import {
   exampleDataDirPath,
   exampleMorrowindDataFilesPath,
 } from "@/lib/platform";
-import { cn } from "@/lib/utils";
 import { invoke } from "@tauri-apps/api/core";
 import {
   ArrowLeft,
@@ -49,36 +51,19 @@ const STAGES: { id: OnboardingStage; label: string }[] = [
   { id: "complete", label: "Done" },
 ];
 
-const EASE = [0.22, 1, 0.36, 1] as const;
-
-const slideVariants = {
-  enter: (direction: number) => ({
-    opacity: 0,
-    x: direction > 0 ? 28 : -28,
-    filter: "blur(4px)",
-  }),
-  center: {
-    opacity: 1,
-    x: 0,
-    filter: "blur(0px)",
-  },
-  exit: (direction: number) => ({
-    opacity: 0,
-    x: direction > 0 ? -20 : 20,
-    filter: "blur(4px)",
-  }),
-};
-
 type OnboardingFlowProps = {
   stage: OnboardingStage;
   onStageChange: (stage: OnboardingStage) => void;
   onFinish: () => void;
+  /** Back out of the hosting path, to the "How will you play?" screen. */
+  onLeavePath: () => void;
 };
 
 export function OnboardingFlow({
   stage,
   onStageChange,
   onFinish,
+  onLeavePath,
 }: OnboardingFlowProps) {
   const reduceMotion = useReducedMotion();
   const stageIndex = STAGES.findIndex((s) => s.id === stage);
@@ -98,7 +83,7 @@ export function OnboardingFlow({
     <div className="flex h-full w-full flex-col items-center justify-center px-4 py-10">
       <NerevarHeader title="NEREVAR" subtitle="Setup" />
 
-      <OnboardingProgress currentIndex={stageIndex} />
+      <OnboardingProgress steps={STAGES} currentIndex={stageIndex} />
 
       <div className="relative mt-8 w-full max-w-lg">
         <AnimatePresence mode="wait" custom={direction}>
@@ -113,7 +98,7 @@ export function OnboardingFlow({
             className="w-full"
           >
             {stage === "select-data-dir" && (
-              <SelectDataDirStep onNext={goNext} />
+              <SelectDataDirStep onNext={goNext} onBack={onLeavePath} />
             )}
             {stage === "morrowind-installation" && (
               <MorrowindInstallationStep onNext={goNext} />
@@ -131,60 +116,6 @@ export function OnboardingFlow({
         </AnimatePresence>
       </div>
     </div>
-  );
-}
-
-function OnboardingProgress({ currentIndex }: { currentIndex: number }) {
-  return (
-    <ol className="flex items-center gap-2 sm:gap-3">
-      {STAGES.map((step, index) => {
-        const isComplete = index < currentIndex;
-        const isCurrent = index === currentIndex;
-
-        return (
-          <li key={step.id} className="flex items-center gap-2 sm:gap-3">
-            <motion.div
-              layout
-              className={cn(
-                "flex items-center gap-2 rounded-full border px-2.5 py-1 transition-colors sm:px-3",
-                isCurrent &&
-                  "border-accent/50 bg-card/80 shadow-[0_0_12px_hsl(var(--accent)/0.15)]",
-                isComplete && "border-accent/30 bg-card/50",
-                !isCurrent && !isComplete && "border-border/50 bg-card/30",
-              )}
-              transition={{ duration: 0.25, ease: EASE }}
-            >
-              <span
-                className={cn(
-                  "flex size-5 items-center justify-center rounded-full text-[0.75rem] font-display font-semibold",
-                  isCurrent && "bg-accent text-accent-foreground",
-                  isComplete && "bg-accent/80 text-accent-foreground",
-                  !isCurrent && !isComplete && "bg-muted text-muted-foreground",
-                )}
-              >
-                {isComplete ? <Check className="size-3" /> : index + 1}
-              </span>
-              <span
-                className={cn(
-                  "hidden font-display text-[0.75rem] tracking-[0.3em] uppercase sm:inline",
-                  isCurrent ? "text-accent font-bold" : "text-foreground/55",
-                )}
-              >
-                {step.label}
-              </span>
-            </motion.div>
-            {index < STAGES.length - 1 && (
-              <div
-                className={cn(
-                  "h-px w-4 sm:w-6",
-                  index < currentIndex ? "bg-accent/50" : "bg-border/60",
-                )}
-              />
-            )}
-          </li>
-        );
-      })}
-    </ol>
   );
 }
 
@@ -221,8 +152,10 @@ function MorrowindInstallationStep({ onNext }: { onNext: () => void }) {
   };
 
   const handleGenerateDefaultOpenMWConfig = async () => {
-    invoke<void>("generate_default_global_openmw_config", {
-      morrowindInstallationPath,
+    // Writes the scaffold *and* records the Data Files path in config.json,
+    // so both onboarding paths leave the same trace.
+    invoke<void>("set_morrowind_data_files", {
+      morrowindDataFiles: morrowindInstallationPath,
     })
       .then(() => {
         toast.success("Nerevar OpenMW scaffold created");
@@ -352,7 +285,15 @@ function MorrowindInstallationStep({ onNext }: { onNext: () => void }) {
     </OnboardingStepCard>
   );
 }
-function SelectDataDirStep({ onNext }: { onNext: () => void }) {
+function SelectDataDirStep({
+  onNext,
+  onBack,
+}: {
+  onNext: () => void;
+  // The first step of this path, so back is out of the path itself: to the
+  // screen that asked whether the user is hosting or joining.
+  onBack: () => void;
+}) {
   const config = useConfig();
   const [dataDir, setDataDir] = useState<string>(config?.rootPath || "");
 
@@ -408,6 +349,7 @@ function SelectDataDirStep({ onNext }: { onNext: () => void }) {
         </div>
       </CardContent>
       <StepActions
+        onBack={onBack}
         onPrimary={() => {
           invoke<void>("set_root_path", { path: dataDir })
             .then(() => {
@@ -419,7 +361,6 @@ function SelectDataDirStep({ onNext }: { onNext: () => void }) {
             });
         }}
         primaryLabel="Continue"
-        showBack={false}
         nextDisabled={!dataDir || dataDir.length === 0}
       />
     </OnboardingStepCard>

@@ -16,6 +16,8 @@ export * from "./InstanceConfig";
 export * from "./InstanceConnectionSettings";
 export * from "./InstanceEditPayload";
 export * from "./NerevarConfig";
+export * from "./MorrowindCandidate";
+export * from "./MorrowindCandidateSource";
 export * from "./NewInstanceConfig";
 export * from "./NewConnectionConfig";
 export * from "./LoadOrder";

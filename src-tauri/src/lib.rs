@@ -55,6 +55,7 @@ pub(crate) use nerevar_core::AppState;
 use crate::data::GithubReleaseResponse;
 use crate::data::NerevarConfig;
 use crate::data::NewInstanceConfig;
+use nerevar_core::morrowind_locate::MorrowindCandidate;
 use nerevar_core::runtime::{RuntimeInspection, RuntimeSource};
 use crate::process_manager::ProcessManager;
 use crate::reporter::{EventSink, TauriEventSink};
@@ -187,6 +188,48 @@ async fn generate_default_global_openmw_config(
         .map_err(|e| e.to_string())
 }
 
+/// The Morrowind installations onboarding can offer instead of a file picker.
+/// An empty list means "nothing found here" — the screen falls back to the
+/// picker, which is what every install did before this.
+#[tauri::command]
+fn find_morrowind_installations() -> Vec<MorrowindCandidate> {
+    nerevar_core::morrowind_locate::find_morrowind_data_files()
+}
+
+/// Where the joining path puts instances unless the player opens "advanced"
+/// and picks somewhere else. Created here, so the path the screen shows is a
+/// directory that exists.
+#[tauri::command]
+fn default_player_data_directory() -> Result<String, String> {
+    nerevar_core::config::ensure_default_instances_dir()
+}
+
+/// Writes the OpenMW scaffold from a Morrowind `Data Files` directory and
+/// records the directory in `config.json`. Both onboarding paths use it.
+#[tauri::command]
+async fn set_morrowind_data_files(
+    state: State<'_, Mutex<AppState>>,
+    morrowind_data_files: String,
+) -> Result<(), String> {
+    nerevar_core::config::set_morrowind_data_files(state.inner(), morrowind_data_files).await
+}
+
+/// A free instance name near `desired_name` — the join flow names an instance
+/// after the host's own instance, which two hosts may well share.
+#[tauri::command]
+fn unique_synced_instance_name(
+    state: State<'_, Mutex<AppState>>,
+    desired_name: String,
+) -> Result<String, String> {
+    let guard = state
+        .lock()
+        .map_err(|_| "App state lock poisoned".to_string())?;
+    Ok(nerevar_core::config::unique_synced_instance_name(
+        &guard.nerevar_config,
+        &desired_name,
+    ))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -317,6 +360,10 @@ pub fn run() {
             add_instance,
             validate_global_openmw_config,
             generate_default_global_openmw_config,
+            find_morrowind_installations,
+            default_player_data_directory,
+            set_morrowind_data_files,
+            unique_synced_instance_name,
             instance_data::commands::scan_instance_data,
             instance_data::commands::get_instance_load_order,
             instance_data::commands::save_instance_load_order,
