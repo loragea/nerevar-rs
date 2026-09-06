@@ -56,6 +56,11 @@ pub struct AdminStatus {
     /// embedder supervises no process (the desktop app's server, or a daemon
     /// built without a process manager wired into the HTTP context).
     pub tes3mp_server_running: Option<bool>,
+    /// RFC 3339 instant the running TES3MP dedicated server was launched, or
+    /// `null` when it is not running or the embedder supervises no process. A
+    /// restart moves it forward, which is how an admin confirms the game
+    /// server really did come back rather than never having stopped.
+    pub tes3mp_server_started_at: Option<String>,
     /// Staged, not-yet-applied changes, or `null` when nothing is pending.
     /// `null` and an object with empty lists would mean the same thing, so
     /// only one of them is ever sent: nothing pending is `null`.
@@ -93,6 +98,7 @@ pub fn build_admin_status(
     instance_id: Option<String>,
     data_dir: Option<&Path>,
     tes3mp_server_running: Option<bool>,
+    tes3mp_server_started_at: Option<String>,
     tes3mp_plugin_list_stale: bool,
 ) -> AdminStatus {
     let hosting = instance_id.is_some() && data_dir.is_some();
@@ -124,6 +130,7 @@ pub fn build_admin_status(
         load_order,
         manifest,
         tes3mp_server_running,
+        tes3mp_server_started_at,
         pending_changes: data_dir.and_then(pending_changes_for),
         tes3mp_plugin_list_stale,
     }
@@ -175,13 +182,14 @@ mod tests {
 
     #[test]
     fn a_host_with_nothing_on_disk_reports_nulls_rather_than_zeroes() {
-        let status = build_admin_status(None, None, None, false);
+        let status = build_admin_status(None, None, None, None, false);
         assert!(!status.hosting);
         assert!(status.instance_id.is_none());
         assert!(status.instance_name.is_none());
         assert!(status.load_order.is_none());
         assert!(status.manifest.is_none());
         assert!(status.tes3mp_server_running.is_none());
+        assert!(status.tes3mp_server_started_at.is_none());
         assert!(status.pending_changes.is_none());
         assert!(!status.tes3mp_plugin_list_stale);
     }
@@ -189,7 +197,7 @@ mod tests {
     #[test]
     fn nothing_pending_serializes_as_a_present_null() {
         let value =
-            serde_json::to_value(build_admin_status(None, None, Some(false), true)).unwrap();
+            serde_json::to_value(build_admin_status(None, None, Some(false), None, true)).unwrap();
         assert_eq!(value["pendingChanges"], serde_json::Value::Null);
         assert!(
             value.as_object().unwrap().contains_key("pendingChanges"),
@@ -197,6 +205,7 @@ mod tests {
         );
         assert_eq!(value["tes3mpServerRunning"], serde_json::json!(false));
         assert_eq!(value["tes3mpPluginListStale"], serde_json::json!(true));
+        assert_eq!(value["tes3mpServerStartedAt"], serde_json::Value::Null);
     }
 
     #[test]
@@ -226,8 +235,13 @@ mod tests {
         pending.mark_removal("Old Mod");
         save_pending(&data_dir, &pending).unwrap();
 
-        let status =
-            build_admin_status(Some("inst".to_string()), Some(&data_dir), Some(true), false);
+        let status = build_admin_status(
+            Some("inst".to_string()),
+            Some(&data_dir),
+            Some(true),
+            Some("2026-09-06T10:00:00+00:00".to_string()),
+            false,
+        );
         let changes = status.pending_changes.expect("a pending set");
         assert_eq!(changes.staged.len(), 1);
         assert!(

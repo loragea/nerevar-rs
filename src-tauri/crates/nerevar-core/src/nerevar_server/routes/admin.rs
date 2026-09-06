@@ -17,15 +17,18 @@
 //!
 //! Tokens are never logged, in any branch.
 //!
-//! **Stage, then apply.** Every write route except `POST /admin/apply` edits
-//! the staging area under `<data dir>/.nerevar/staging/` and nothing else
-//! (`crate::admin::staging`); apply is the one call that rewrites `data/`,
-//! `load-order.json` and `manifest.json`, and it re-activates hosting so the
-//! served manifest and the file cache are the new ones. Apply runs on a
-//! blocking thread — it hashes the whole data directory — and every write
-//! route serializes on [`ServerContext::admin_write_lock`], which apply takes
-//! without waiting so a second concurrent apply is a `409` rather than a
-//! queue.
+//! **Stage, then apply.** Every write route except `POST /admin/apply` and
+//! `POST /admin/restart` edits the staging area under
+//! `<data dir>/.nerevar/staging/` and nothing else (`crate::admin::staging`);
+//! apply is the one call that rewrites `data/`, `load-order.json` and
+//! `manifest.json`, and it re-activates hosting so the served manifest and the
+//! file cache are the new ones. Restart touches no files at all: it replaces
+//! the TES3MP process so the applied plugin list finally takes effect
+//! (`crate::admin::restart`). Both run on a blocking thread — apply hashes the
+//! whole data directory, restart waits for the game port to be released — and
+//! every write route serializes on [`ServerContext::admin_write_lock`], which
+//! those two take without waiting so a second concurrent one is a `409` rather
+//! than a queue.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -49,8 +52,8 @@ use crate::admin::staging::{
 };
 use crate::admin::{
     build_admin_status, execute_apply, instance_name_for_rebuild, load_admins, pending_changes_for,
-    role_grants, stage_uploaded_archive, AdminPendingChanges, ApplyPlan, Capability,
-    ADMIN_APPLY_EVENT, ADMIN_REQUEST_EVENT,
+    restart_tes3mp_server, role_grants, stage_uploaded_archive, AdminPendingChanges, ApplyPlan,
+    Capability, ADMIN_APPLY_EVENT, ADMIN_REQUEST_EVENT, ADMIN_RESTART_EVENT,
 };
 use crate::instance_data::LoadOrder;
 use crate::nerevar_server::state::ServerContext;
@@ -142,6 +145,13 @@ pub fn router(ctx: Arc<ServerContext>) -> Router {
             "/admin/apply",
             post(apply).route_layer(middleware::from_fn_with_state(
                 Capability::Apply,
+                require_capability,
+            )),
+        )
+        .route(
+            "/admin/restart",
+            post(restart).route_layer(middleware::from_fn_with_state(
+                Capability::Restart,
                 require_capability,
             )),
         )
@@ -386,17 +396,27 @@ async fn admin_status(State(ctx): State<Arc<ServerContext>>) -> Response {
         }
     };
 
-    // Only the embedder that owns the TES3MP child can answer this; a lock
+    // Only the embedder that owns the TES3MP child can answer these; a lock
     // error there is "cannot tell", which is what `null` means.
-    let tes3mp_server_running = match (ctx.process_manager.as_ref(), instance_id.as_deref()) {
-        (Some(manager), Some(id)) => manager.is_running(id, ProcessRole::Server).ok(),
+    let supervised = match (ctx.process_manager.as_ref(), instance_id.as_deref()) {
+        (Some(manager), Some(id)) => Some((manager, id)),
         _ => None,
     };
+    let tes3mp_server_running =
+        supervised.and_then(|(manager, id)| manager.is_running(id, ProcessRole::Server).ok());
+    // Only meaningful for a server that is up: the manager keeps an exited
+    // child's entry around until its watcher reaps it, and a launch time for a
+    // process that is gone would read as uptime it does not have.
+    let tes3mp_server_started_at = supervised
+        .filter(|_| tes3mp_server_running == Some(true))
+        .and_then(|(manager, id)| manager.started_at(id, ProcessRole::Server).ok().flatten())
+        .map(|started| started.to_rfc3339());
 
     Json(build_admin_status(
         instance_id,
         data_dir.as_deref(),
         tes3mp_server_running,
+        tes3mp_server_started_at,
         ctx.tes3mp_plugin_list_stale.load(Ordering::Relaxed),
     ))
     .into_response()
@@ -769,6 +789,114 @@ async fn apply(
         runtime_hint,
     ))
     .into_response()
+}
+
+/// Payload of the event a restart emits, next to the audit line every
+/// `/admin` request already writes.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AdminRestartEvent {
+    admin: String,
+    pid: Option<u32>,
+    started_at: Option<String>,
+    /// Whether there was a live server to stop, or the restart started one
+    /// that had already gone away.
+    was_running: bool,
+}
+
+/// `POST /admin/restart` — stop the TES3MP dedicated server and start it again
+/// now.
+///
+/// The lever apply deliberately does not pull: TES3MP reads its plugin list
+/// once, at start, so an applied mod list only reaches players' sessions after
+/// this. It kicks everyone connected, which is why the admin chooses the
+/// moment.
+///
+/// Only the embedder that launched the game server can restart it, so a `409`
+/// — not a `500` — is the answer on the desktop app and on a `--sync-only`
+/// daemon, and nothing is attempted in either case. Serialized behind the same
+/// write lock as apply, taken without waiting: a restart queued behind a
+/// five-minute rebuild is never what the caller meant.
+async fn restart(
+    State(ctx): State<Arc<ServerContext>>,
+    Extension(identity): Extension<AdminIdentity>,
+) -> Response {
+    let Some(manager) = ctx.process_manager.clone() else {
+        return error_response(
+            StatusCode::CONFLICT,
+            "This host does not supervise a TES3MP dedicated server, so there is nothing to \
+             restart",
+        );
+    };
+    if !ctx.server_restart.is_supervising() {
+        return error_response(
+            StatusCode::CONFLICT,
+            "This host is not running a TES3MP dedicated server (started with --sync-only), so \
+             there is nothing to restart",
+        );
+    }
+
+    let Ok(_guard) = ctx.admin_write_lock.try_lock() else {
+        return error_response(
+            StatusCode::CONFLICT,
+            "Another admin change is in progress; try again when it finishes",
+        );
+    };
+
+    let hosted = match hosted_instance(&ctx) {
+        Ok(hosted) => hosted,
+        Err((status, message)) => return error_response(status, message),
+    };
+
+    // Blocking: the stop reaps the process group so the game port is free
+    // before the relaunch binds it.
+    let sink = ctx.sink.clone();
+    let restart_state = ctx.server_restart.clone();
+    let instance_id = hosted.instance_id.clone();
+    let instance_root = hosted.instance_root.clone();
+    let data_dir = hosted.data_dir.clone();
+    let outcome = blocking(move || {
+        Ok(restart_tes3mp_server(
+            sink,
+            &manager,
+            &restart_state,
+            &instance_id,
+            &instance_root,
+            &data_dir,
+        )?)
+    })
+    .await;
+
+    let outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(error) => return error.into_response(),
+    };
+
+    // The new process read the plugin list the last apply wrote, so whatever
+    // was stale about the old one is settled.
+    ctx.tes3mp_plugin_list_stale.store(false, Ordering::Relaxed);
+    log::info!(
+        "TES3MP server restarted by admin {} for instance \"{}\"{}",
+        identity.name,
+        hosted.instance_id,
+        match outcome.pid {
+            Some(pid) => format!(" (pid {pid})"),
+            None => String::new(),
+        }
+    );
+
+    emit_event(
+        &*ctx.sink,
+        ADMIN_RESTART_EVENT,
+        &AdminRestartEvent {
+            admin: identity.name,
+            pid: outcome.pid,
+            started_at: outcome.started_at.clone(),
+            was_running: outcome.was_running,
+        },
+    );
+
+    Json(outcome).into_response()
 }
 
 fn plan_names(plan: &ApplyPlan) -> Vec<String> {

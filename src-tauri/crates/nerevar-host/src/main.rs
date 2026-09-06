@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use clap::Parser;
 
+use nerevar_core::admin::ServerRestartState;
 use nerevar_core::instance_data::resolve_package_data_dir;
 use nerevar_core::instance_setup::{instance_tes3mp_dir, read_tes3mp_server_settings};
 use nerevar_core::nerevar_server::state::ServerContext;
@@ -176,6 +177,11 @@ async fn run(cli: Cli) -> Result<i32, String> {
         "Sync hosting active for instance \"{instance_name}\" ({instance_id}) on port {sync_port}"
     );
 
+    // The same `Arc` the `/admin` routes hold: it says whether there is a
+    // game server to restart, and it is how the watch below tells an
+    // admin-requested restart from a crash.
+    let restart_state = server_ctx.server_restart.clone();
+
     let supervisor_handle = tokio::spawn(run_server_supervisor(
         port_rx,
         retry_rx,
@@ -199,9 +205,17 @@ async fn run(cli: Cli) -> Result<i32, String> {
             "TES3MP dedicated server launched for instance \"{instance_name}\" on port {}",
             hosted.tes3mp_server_port
         );
+        // Only now is there something for `POST /admin/restart` to restart.
+        restart_state.mark_supervising();
     }
 
-    let stop = wait_for_stop(&process_manager, &instance_id, cli.sync_only).await;
+    let stop = wait_for_stop(
+        &process_manager,
+        &instance_id,
+        cli.sync_only,
+        &restart_state,
+    )
+    .await;
     let exit_code = match stop {
         Stop::Signal => {
             log::info!("Shutting down...");
@@ -243,7 +257,12 @@ async fn run(cli: Cli) -> Result<i32, String> {
 /// second arm the daemon sat there with sync hosting up and no game server —
 /// the unit still `active (running)`, the friend group still unable to
 /// connect, and nothing restarting anything.
-async fn wait_for_stop(manager: &Arc<ProcessManager>, instance_id: &str, sync_only: bool) -> Stop {
+async fn wait_for_stop(
+    manager: &Arc<ProcessManager>,
+    instance_id: &str,
+    sync_only: bool,
+    restart_state: &Arc<ServerRestartState>,
+) -> Stop {
     if sync_only {
         signal::wait_for_shutdown_signal().await;
         return Stop::Signal;
@@ -251,19 +270,40 @@ async fn wait_for_stop(manager: &Arc<ProcessManager>, instance_id: &str, sync_on
 
     tokio::select! {
         _ = signal::wait_for_shutdown_signal() => Stop::Signal,
-        _ = watch_server(manager, instance_id) => Stop::ServerDied,
+        _ = watch_server(manager, instance_id, restart_state) => Stop::ServerDied,
     }
 }
 
-/// Resolves once the managed TES3MP server is no longer running. A lock error
-/// counts as "gone": supervision is broken at that point, and exiting hands
-/// the problem to the service manager instead of hiding it.
-async fn watch_server(manager: &Arc<ProcessManager>, instance_id: &str) {
+/// Resolves once the managed TES3MP server is no longer running *and* nobody
+/// asked for that. A lock error counts as "gone": supervision is broken at
+/// that point, and exiting hands the problem to the service manager instead of
+/// hiding it.
+///
+/// `POST /admin/restart` stops the same child on purpose, which without the
+/// mark below reads exactly like a crash and would take the whole daemon down
+/// every time a co-admin published a mod list. The mark is taken *before* the
+/// liveness check, so a restart that begins and ends inside one tick is caught
+/// too; see `nerevar_core::admin::restart`. Once the restart is over, a death
+/// of the new process is a death again.
+async fn watch_server(
+    manager: &Arc<ProcessManager>,
+    instance_id: &str,
+    restart_state: &Arc<ServerRestartState>,
+) {
     loop {
         tokio::time::sleep(SERVER_WATCH_INTERVAL).await;
+        let mark = restart_state.mark();
         match manager.is_running(instance_id, ProcessRole::Server) {
             Ok(true) => continue,
-            Ok(false) => return,
+            Ok(false) => {
+                if restart_state.is_unrequested_death(mark) {
+                    return;
+                }
+                log::info!(
+                    "TES3MP dedicated server is down because an admin restart is in progress; \
+                     not treating it as a crash"
+                );
+            }
             Err(err) => {
                 log::error!("Cannot tell whether the TES3MP server is running: {err}");
                 return;

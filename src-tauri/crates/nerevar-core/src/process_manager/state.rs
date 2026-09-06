@@ -4,6 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
+
 use crate::openmw_ini_importer::GlobalOpenMwLaunchSession;
 use crate::reporter::{emit_event, EventSink};
 use crate::sync_client::types::ProcessStatusEvent;
@@ -12,6 +14,10 @@ use super::types::ProcessRole;
 
 pub struct ManagedProcess {
     pub child: Arc<Mutex<Option<Child>>>,
+    /// When this child was handed to the manager, which is within
+    /// milliseconds of when it was spawned. Reported by
+    /// `GET /admin/status` as the game server's uptime anchor.
+    pub started_at: DateTime<Utc>,
 }
 
 pub struct ProcessManager {
@@ -132,6 +138,7 @@ impl ProcessManager {
             key,
             ManagedProcess {
                 child: wrapped.clone(),
+                started_at: Utc::now(),
             },
         );
         Ok(wrapped)
@@ -225,6 +232,53 @@ impl ProcessManager {
         if let Ok(mut guard) = self.processes.lock() {
             guard.remove(&Self::key(instance_id, role));
         }
+    }
+
+    /// The pid of the tracked child for `role`, or `None` when nothing is
+    /// tracked. On Linux this is the pid of TES3MP's wrapper script — the same
+    /// pid the manager signals as a process group, not a second one — and it
+    /// is only meaningful while the child is alive, so callers pair it with
+    /// [`ProcessManager::is_running`] or read it right after a launch.
+    pub fn pid(&self, instance_id: &str, role: ProcessRole) -> Result<Option<u32>, String> {
+        let Some(child_arc) = self.child_handle(instance_id, role)? else {
+            return Ok(None);
+        };
+        let slot = child_arc
+            .lock()
+            .map_err(|_| "Process child lock poisoned".to_string())?;
+        Ok(slot.as_ref().map(|child| child.id()))
+    }
+
+    /// When the tracked child for `role` was launched, or `None` when nothing
+    /// is tracked.
+    pub fn started_at(
+        &self,
+        instance_id: &str,
+        role: ProcessRole,
+    ) -> Result<Option<DateTime<Utc>>, String> {
+        let guard = self
+            .processes
+            .lock()
+            .map_err(|_| "Process manager lock poisoned".to_string())?;
+        Ok(guard
+            .get(&Self::key(instance_id, role))
+            .map(|managed| managed.started_at))
+    }
+
+    /// The child handle for `role`, cloned out from under the map lock so no
+    /// caller holds both locks at once.
+    fn child_handle(
+        &self,
+        instance_id: &str,
+        role: ProcessRole,
+    ) -> Result<Option<Arc<Mutex<Option<Child>>>>, String> {
+        let guard = self
+            .processes
+            .lock()
+            .map_err(|_| "Process manager lock poisoned".to_string())?;
+        Ok(guard
+            .get(&Self::key(instance_id, role))
+            .map(|managed| managed.child.clone()))
     }
 
     /// Report whether the managed child is still alive, WITHOUT taking it.

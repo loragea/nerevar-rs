@@ -302,7 +302,9 @@ counts, when the manifest was generated and how old it is, the pending change
 set (`pendingChanges`: staged packages, packages marked for removal, whether a
 load order is waiting — `null` when nothing is staged), whether a running
 TES3MP server is behind the served manifest (`tes3mpPluginListStale`), and —
-when the daemon supervises the game server — whether TES3MP is running. A missing or
+when the daemon supervises the game server — whether TES3MP is running
+(`tes3mpServerRunning`) and when it was launched (`tes3mpServerStartedAt`,
+RFC 3339, `null` when it is not running). A missing or
 unrecognised token is `401`; a valid token whose role does not grant the route's
 capability is `403`. Both come back as `{"error": "..."}`. Every authenticated
 request is logged with the admin's name, the method, the path, and the response
@@ -371,8 +373,29 @@ the new manifest up on their next sync.
 **Apply does not restart TES3MP.** The dedicated server reads its plugin list
 once, at start, so after an apply the running game server is still enforcing
 the old one. The daemon logs a warning and `status` reports
-`tes3mpPluginListStale: true`; restart the service (`systemctl restart
-nerevar-host`) when the players are ready.
+`tes3mpPluginListStale: true`.
+
+**Restart the game server when the players are ready.** This is a separate
+call because it **kicks everyone connected** — the game server stops and comes
+back, and clients have to reconnect — so an apply publishes the new mod list
+and you choose the moment it takes effect:
+
+```
+curl -X POST -H "$A" "$H/admin/restart"
+```
+
+The reply is `{"restarted": true, "pid": ..., "startedAt": ..., "wasRunning":
+...}` with the new process's pid and launch time. The daemon stops the old
+process group, waits for the game port to be released, and relaunches with the
+`requiredDataFiles.json` the apply wrote; it does **not** treat its own restart
+as a crash, so the service stays up and `tes3mpPluginListStale` goes back to
+`false`. If the game server dies for any other reason — before, during, or
+after a restart — the daemon still exits `69` and leaves the recovery to the
+service manager. `systemctl restart nerevar-host` remains the equivalent from a
+shell, at the cost of also dropping sync hosting for the few seconds the
+manifest rebuild takes. A restart is serialized with apply: a `409` means one
+of the two is already running. It is also a `409` on a `--sync-only` daemon,
+which has no game server to restart.
 
 ### Roles
 
