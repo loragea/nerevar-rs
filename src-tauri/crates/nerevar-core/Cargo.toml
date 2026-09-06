@@ -28,6 +28,9 @@ axum = "0.8.9"
 netstat2 = "0.11.2"
 sysinfo = "0.37.2"
 sha2 = "0.10.9"
+# OS CSPRNG for co-admin tokens. Already in the lock file as a transitive
+# dependency; named here so `admin::store` may call it directly.
+getrandom = "0.4.2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 urlencoding = "2.1.3"
 csv = "1.3"

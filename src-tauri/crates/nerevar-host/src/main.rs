@@ -1,3 +1,4 @@
+mod admin;
 mod check;
 mod cli;
 mod config;
@@ -23,7 +24,7 @@ use nerevar_core::sync_host::{
     activate_hosting, deactivate_hosting, new_shared_hosting_manifest_cache, new_shared_sync_host,
 };
 
-use cli::Cli;
+use cli::{Cli, Command};
 use sink::LogEventSink;
 
 /// Exit code for "the TES3MP dedicated server exited on its own" — distinct
@@ -68,6 +69,12 @@ enum Stop {
 }
 
 async fn run(cli: Cli) -> Result<i32, String> {
+    // Management subcommands resolve the same config and instance a daemon run
+    // does, then exit — they never bind a port or launch anything.
+    if let Some(Command::Admin { action }) = &cli.command {
+        return admin::run(&cli, action);
+    }
+
     let resolved = config::resolve_and_load_config(cli.config.as_deref())?;
     let instance = instance::select_owned_instance(&resolved.config, cli.instance.as_deref())?;
     let sync_port = cli.port.unwrap_or(resolved.config.sync_port);
@@ -132,8 +139,16 @@ async fn run(cli: Cli) -> Result<i32, String> {
     let (_retry_tx, retry_rx) = tokio::sync::watch::channel(0u64);
     let (_enabled_tx, enabled_rx) = tokio::sync::watch::channel(true);
 
-    let server_ctx = ServerContext::new(sync_host.clone(), manifest_cache.clone());
     let sink: Arc<dyn EventSink> = Arc::new(LogEventSink);
+    let process_manager = Arc::new(ProcessManager::new());
+
+    // The HTTP server's `/admin` routes need both: the sink so every
+    // authenticated admin request lands in the journal, and the process
+    // manager so `GET /admin/status` can say whether TES3MP is up.
+    let server_ctx = ServerContext::builder(sync_host.clone(), manifest_cache.clone())
+        .with_sink(sink.clone())
+        .with_process_manager(process_manager.clone())
+        .shared();
 
     // The hint is advertised, not applied: a malformed one costs players a
     // preselected runtime, which is no reason to refuse to host. `--check`
@@ -169,7 +184,6 @@ async fn run(cli: Cli) -> Result<i32, String> {
         sink.clone(),
     ));
 
-    let process_manager = Arc::new(ProcessManager::new());
     if cli.sync_only {
         log::info!("--sync-only: not launching the TES3MP dedicated server");
     } else {

@@ -217,6 +217,10 @@ nerevar-host [--config <path>] [--instance <id-or-name>] [--port <n>]
              [--scan] [--no-manifest-rebuild] [--sync-only] [--check]
 ```
 
+With no subcommand it runs as the daemon, as below. `nerevar-host admin …`
+manages co-admin tokens and exits without binding anything — see
+[Co-admins](#co-admins).
+
 | Flag | Effect |
 | --- | --- |
 | `--config <path>` | Config file to read. Default: the per-user GUI config (`$XDG_DATA_HOME/dev.kyleaustad.nerevar/config.json`) if it exists, else `/etc/nerevar/config.json`. Never created automatically. |
@@ -251,6 +255,73 @@ the daemon warns about when the load order is newer than the manifest.
 Exit codes: `0` asked to stop, `1` startup or config failure, `69` the TES3MP
 server exited on its own (the daemon then shuts hosting down with it rather than
 stay up looking healthy while nobody can play).
+
+## Co-admins
+
+A co-admin is somebody you let change the host's mod list over HTTP without
+giving them a shell. They authenticate with a **named bearer token**, separate
+from the sync password players use — so `admin list` and the daemon's log say
+*who* did something, and revoking one person does not change anyone else's
+credentials.
+
+Create one:
+
+```
+nerevar-host [--config <path>] [--instance <id-or-name>] admin add ada
+```
+
+The token — 64 hex characters, 32 random bytes — is printed to **stdout,
+alone**, so `nerevar-host admin add ada > ada.token` captures the secret and
+nothing else. Everything else the command says goes to stderr. It is shown
+once and cannot be recovered: only its SHA-256 is stored. If it is lost,
+revoke the name and add it again.
+
+```
+nerevar-host admin list             # name, role, created-at (never hashes)
+nerevar-host admin revoke ada       # the token stops working immediately
+```
+
+The store is `<data dir>/.nerevar/admins.json`, owned by the daemon and
+written `0600`. The GUI never touches it, so a desktop user editing the same
+instance will not wipe it. The daemon re-reads it on every admin request, so
+`admin add` and `admin revoke` take effect against a running daemon — no
+restart, no signal. These commands exit `0` on success and `1` on failure
+(unknown instance, duplicate name, unknown role), like every other non-daemon
+path.
+
+### Using a token
+
+Send it as a bearer header on the sync port:
+
+```
+curl -H "Authorization: Bearer $(cat ada.token)" http://myhost:25567/admin/status
+```
+
+`GET /admin/status` reports whether hosting is active, the instance, load-order
+counts, when the manifest was generated and how old it is, and — when the
+daemon supervises the game server — whether TES3MP is running. A missing or
+unrecognised token is `401`; a valid token whose role does not grant the route's
+capability is `403`. Both come back as `{"error": "..."}`. Every authenticated
+request is logged with the admin's name, the method, the path, and the response
+status, at `info`, so `journalctl -u nerevar-host` is the audit trail.
+
+### Roles
+
+Each admin record carries a **role**, and a role is a named set of
+capabilities (`status`, `stage`, `apply`, `restart`, `manage-admins`) declared
+in one table in the code. Only `admin` exists today and it grants all of them,
+which is why `--role` can be left off. Routes ask for a capability, never for
+"is this an admin", so narrower roles are a table entry rather than a rewrite.
+A role name in `admins.json` that this build does not know authenticates
+nothing — the daemon warns once and treats those records as inert.
+
+### HTTPS
+
+The daemon speaks plain **HTTP** and has no TLS of its own. On a LAN or a VPN
+that is fine. Over the internet, put a reverse proxy (nginx, Caddy) in front of
+the sync port and terminate TLS there — a bearer token in a plaintext header is
+readable by anything on the path. Pass the `Authorization` and
+`X-Nerevar-Sync-Password` headers through unchanged.
 
 ## Run it under systemd
 
@@ -321,7 +392,7 @@ curl http://localhost:25567/health      # no password needed; "ok" if hosting is
 
 | Port | Protocol | Who connects | Notes |
 | --- | --- | --- | --- |
-| `syncPort` (e.g. 25567) | TCP | Nerevar clients | Manifest + mod-file downloads. Password-protected when the server password is set. |
+| `syncPort` (e.g. 25567) | TCP | Nerevar clients, co-admins | Manifest + mod-file downloads, password-protected when the server password is set; also the `/admin` routes, which take a bearer token instead. |
 | `[General] port` (e.g. 25565) | UDP | TES3MP game clients | The game itself. |
 
 Both need to be reachable from the internet (or your VPN) for friends to sync

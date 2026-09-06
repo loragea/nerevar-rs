@@ -16,8 +16,10 @@ Tauri 2 application, three parts:
   - `crates/nerevar-core` (`nerevar-core`) — the Tauri-free engine: instance
     management (`instance_data/`, `instance_setup/`, `instance_settings/`),
     host/client sync (`sync_host/`, `sync_client/`, `sync_paths.rs`,
-    `sync_auth.rs`), the embedded HTTP server (`nerevar_server/`), process
-    management (`process_manager/`), config (`config/`), the client-pulled
+    `sync_auth.rs`), co-admin identity for the headless host (`admin/`: the
+    `admins.json` token store and the role→capability table behind the
+    server's `/admin` routes), the embedded HTTP server (`nerevar_server/`),
+    process management (`process_manager/`), config (`config/`), the client-pulled
     TES3MP runtime (`runtime/`: `RuntimeSource` says where an instance's
     build comes from — a release of any GitHub repository over the releases
     API (`github_getters.rs`; official `tes3mp/tes3mp` by default), a
