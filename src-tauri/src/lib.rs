@@ -284,8 +284,15 @@ pub fn run() {
 
             let sink = event_sink.clone();
 
+            // The desktop app always serves plain HTTP; native TLS is the
+            // headless daemon's, and its transport lives in that crate.
             tauri::async_runtime::spawn(supervisor::run_server_supervisor(
-                rx, retry_rx, enabled_rx, server_ctx, sink,
+                rx,
+                retry_rx,
+                enabled_rx,
+                server_ctx,
+                sink,
+                std::sync::Arc::new(nerevar_core::nerevar_server::PlainHttp),
             ));
             Ok(())
         })

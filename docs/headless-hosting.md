@@ -215,6 +215,7 @@ on each plugin). Base-game data goes in `baseGameData`:
 ```
 nerevar-host [--config <path>] [--instance <id-or-name>] [--port <n>]
              [--scan] [--no-manifest-rebuild] [--sync-only] [--check]
+             [--tls-cert <path> --tls-key <path>]
 ```
 
 With no subcommand it runs as the daemon, as below. `nerevar-host admin …`
@@ -230,6 +231,8 @@ manages co-admin tokens and exits without binding anything — see
 | `--no-manifest-rebuild` | Serve the `manifest.json` already on disk instead of rebuilding it. |
 | `--sync-only` | Host sync only; don't launch the TES3MP server. |
 | `--check` | Print the summary above and exit 0/1 without starting anything. |
+| `--tls-cert <path>` | PEM certificate chain; serves the sync port over HTTPS. Requires `--tls-key`. Also read from `NEREVAR_TLS_CERT`. See [HTTPS](#https). |
+| `--tls-key <path>` | PEM private key for that certificate. Requires `--tls-cert`. Also read from `NEREVAR_TLS_KEY`. |
 
 `RUST_LOG` sets the log level (`info` by default; `RUST_LOG=debug` adds sync and
 scan progress events).
@@ -461,19 +464,112 @@ nothing — the daemon warns once and treats those records as inert.
 
 ### HTTPS
 
-The daemon speaks plain **HTTP** and has no TLS of its own. On a LAN or a VPN
-that is fine. Over the internet it is not: both the sync password and a
-co-admin's bearer token travel in plaintext headers, readable by anything on the
-path. Put a reverse proxy (nginx, Caddy) in front of the sync port, terminate
-TLS there, and proxy to the daemon over loopback.
+Over a LAN or a VPN, plain HTTP is fine. Over the internet it is not: both the
+sync password and a co-admin's bearer token travel in plaintext headers,
+readable by anything on the path. Two ways to fix that — the daemon can
+terminate TLS itself, or a reverse proxy can do it.
 
-Players and co-admins then use the proxy's `https://` URL as the **host
+Either way, players and co-admins then enter the `https://` URL as the **host
 address** in the desktop app's connection form — the same field that otherwise
-takes a hostname or IP. When the address is a URL, the sync port field is
+takes a hostname or IP. When the address is a URL the sync port field is
 ignored: the URL carries its own port, explicitly
-(`https://mw.example.org:8443`) or by its scheme. A path prefix works too
-(`https://example.org/nerevar`), so the host can be mounted under a subpath of a
-site that serves other things.
+(`https://mw.example.org:8443`) or by its scheme.
+
+Only the *sync* port is ever HTTPS. TES3MP is UDP straight to the game port, so
+that port stays open on the host and is reached by hostname; Nerevar derives
+that hostname from the URL for you.
+
+Clients verify the certificate against the operating system's trust store, and
+there is no way to pin or override that today. **A self-signed certificate will
+be rejected** — every sync and every admin call fails at the handshake. Use a
+publicly trusted certificate from a CA the platform already knows. (Pinning a
+host's own certificate is a possible follow-up; it does not exist yet.)
+
+#### Native TLS
+
+Point the daemon at a PEM certificate chain and its private key:
+
+```
+nerevar-host --config /etc/nerevar/config.json \
+             --tls-cert /etc/letsencrypt/live/mw.example.org/fullchain.pem \
+             --tls-key  /etc/letsencrypt/live/mw.example.org/privkey.pem
+```
+
+Both flags or neither — one without the other is a startup error (exit 1).
+`NEREVAR_TLS_CERT` and `NEREVAR_TLS_KEY` set the same two paths, which is the
+tidier form inside a systemd unit. They are command-line/environment settings
+rather than config-file keys because `config.json` is the desktop app's file and
+is shared with GUI users; certificate paths belong to this host only.
+
+- `--tls-cert` takes the **full chain** in PEM (`-----BEGIN CERTIFICATE-----`,
+  leaf first, then intermediates) — certbot's `fullchain.pem`, not `cert.pem`.
+  A client that only gets the leaf cannot build a path to the root.
+- `--tls-key` takes a PKCS#8 (`-----BEGIN PRIVATE KEY-----`) or RSA
+  (`-----BEGIN RSA PRIVATE KEY-----`) key in PEM. Certbot writes PKCS#8.
+- With TLS configured, the sync port serves **HTTPS only**. There is no
+  cleartext fallback and no second port; a plain `http://` request to it is
+  refused at the handshake.
+
+`--check` loads and validates the pair before anything binds, which is why the
+example systemd unit runs it as `ExecStartPre`:
+
+```
+$ nerevar-host --config /etc/nerevar/config.json --check \
+      --tls-cert /etc/letsencrypt/live/mw.example.org/fullchain.pem \
+      --tls-key  /etc/letsencrypt/live/mw.example.org/privkey.pem
+nerevar-host --check
+  config path:    /etc/nerevar/config.json
+  instance:       Mundus Patens (mundus)
+  …
+  sync port:      25567 (https)
+  tls cert:       /etc/letsencrypt/live/mw.example.org/fullchain.pem
+  tls key:        /etc/letsencrypt/live/mw.example.org/privkey.pem
+  tls identity:   CN=mw.example.org (mw.example.org), not after Nov 12 09:41:03 2026 +00:00
+  result:         OK
+```
+
+A certificate or key that cannot be read, or a key that does not go with the
+certificate, fails the check and, on a real run, exits 1 as any other config
+failure does. Startup logs one line naming the address and the certificate:
+
+```
+nerevar-host[2451]: [INFO  nerevar_core::nerevar_server] NEREVAR SERVER: serving HTTPS on 0.0.0.0:25567 with certificate /etc/letsencrypt/live/mw.example.org/fullchain.pem
+```
+
+**Getting a certificate with certbot.** The daemon does not speak ACME; obtain
+the certificate separately. Standalone mode needs port 80 free for the
+challenge:
+
+```sh
+sudo certbot certonly --standalone -d mw.example.org
+sudo setfacl -R -m u:nerevar:rX /etc/letsencrypt/live /etc/letsencrypt/archive
+sudo systemctl restart nerevar-host
+```
+
+The daemon runs as an unprivileged user, so it needs read access to
+`/etc/letsencrypt/live/…` and the `archive/` directory the symlinks point into —
+the ACL above is one way; a deploy hook that copies the pair somewhere the
+service user owns is another.
+
+**Renewal needs a restart.** There is no hot reload: the daemon reads the
+certificate once, at startup. Add the restart to the renewal:
+
+```sh
+sudo certbot renew --deploy-hook 'systemctl restart nerevar-host'
+```
+
+A restart drops connected clients mid-sync; they resume on their next attempt.
+If the certificate is within 14 days of expiring, both startup and `--check`
+say so — which, with no hot reload, means renewal has silently stopped
+happening.
+
+#### Reverse proxy
+
+The alternative: leave the daemon on plain HTTP bound to loopback, and put
+nginx or Caddy in front of the sync port. This is the better fit when the host
+already sits behind a web server, when TLS should be mounted under a subpath
+(`https://example.org/nerevar` works as a host address; a path prefix is
+preserved), or when you want certificate renewal to need no service restart.
 
 The proxy has three jobs beyond TLS:
 
@@ -526,9 +622,6 @@ Only the *sync* traffic goes through the proxy. TES3MP itself is UDP straight to
 the game port, so that port stays open on the host and the game connection is
 made to the proxy's hostname, not its URL — Nerevar derives that for you when
 you enter a URL address.
-
-Native TLS in the daemon is planned, not present; until then the proxy is the
-only supported way to serve Nerevar over HTTPS.
 
 ## Run it under systemd
 
@@ -603,7 +696,7 @@ curl http://localhost:25567/health      # no password needed; "ok" if hosting is
 
 | Port | Protocol | Who connects | Notes |
 | --- | --- | --- | --- |
-| `syncPort` (e.g. 25567) | TCP | Nerevar clients, co-admins | Manifest + mod-file downloads, password-protected when the server password is set; also the `/admin` routes, which take a bearer token instead. |
+| `syncPort` (e.g. 25567) | TCP | Nerevar clients, co-admins | HTTP, or HTTPS when `--tls-cert`/`--tls-key` are set (never both on one port). Manifest + mod-file downloads, password-protected when the server password is set; also the `/admin` routes, which take a bearer token instead. |
 | `[General] port` (e.g. 25565) | UDP | TES3MP game clients | The game itself. |
 
 Both need to be reachable from the internet (or your VPN) for friends to sync

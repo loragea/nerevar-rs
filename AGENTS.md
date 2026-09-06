@@ -39,10 +39,14 @@ Tauri 2 application, three parts:
     `app_update.rs` for self-update, `TauriEventSink`).
   - `crates/nerevar-host` (`nerevar-host`) — headless daemon: hosts one owned
     instance (manifest rebuild, sync server, TES3MP dedicated server) with no
-    GUI, for dedicated Linux servers. Depends only on `nerevar-core` plus
-    clap/env_logger/tokio; it must never gain a Tauri dependency, and core
-    must never gain a clap one. Operator-facing docs (instance layout without
-    the GUI, systemd, day-2 mod updates): `docs/headless-hosting.md` and
+    GUI, for dedicated Linux servers. Depends on `nerevar-core` plus
+    clap/env_logger/tokio and — for native HTTPS on the sync port
+    (`--tls-cert`/`--tls-key`) — axum-server/rustls/x509-parser; it must never
+    gain a Tauri dependency, and core must never gain a clap one. The
+    server-side TLS stack is scoped to this crate on purpose: core exposes the
+    router and a `nerevar_server::Transport` trait, so the desktop app links no
+    TLS server. Operator-facing docs (instance layout without the GUI, systemd,
+    day-2 mod updates): `docs/headless-hosting.md` and
     `packaging/systemd/nerevar-host.service`.
   - `crates/nerevar-cli` (`nerevar-cli`) — the command-line client, a thin
     library plus a `main.rs` so its tests drive the same functions the binary

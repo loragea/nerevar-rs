@@ -10,8 +10,30 @@ path = "src/main.rs"
 
 [dependencies]
 nerevar-core = { path = "../nerevar-core" }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 env_logger = "0.11"
 tokio = { version = "1.52.3", features = ["full"] }
 log = "0.4"
 serde_json = "1"
+# Native HTTPS on the sync port. The whole server-side TLS stack is scoped to
+# this crate: nerevar-core exposes the router and a `Transport` trait, so the
+# desktop app — which never terminates TLS — links none of the below.
+# `axum-server` supplies the rustls accept loop for the router core builds.
+axum-server = { version = "0.8", features = ["tls-rustls"] }
+# The ServerConfig itself, so `--check` can load and validate a cert/key pair
+# synchronously and report why a bad one failed. Already in the lock file under
+# reqwest, on the same aws-lc-rs provider.
+rustls = "0.23"
+rustls-pemfile = "2"
+# Reads the leaf certificate's subject, SAN names, and not-after date for
+# `--check` and the near-expiry warning. Without hot reload a renewal only
+# lands on restart, so an expiry a fortnight out is worth saying out loud.
+x509-parser = "0.18"
+
+[dev-dependencies]
+# Generates the self-signed certificate the TLS tests serve; nothing in the
+# workspace could produce one.
+rcgen = "0.14"
+# The HTTPS client the serving test fetches /health with, configured to trust
+# that generated certificate. Already in the lock file under nerevar-core.
+reqwest = { version = "0.13.3", features = ["json"] }
