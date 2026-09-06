@@ -34,21 +34,6 @@ import { navigate } from "wouter/use-browser-location";
 const SECTION_LABEL =
   "text-lg font-light font-display tracking-[0.08em] text-foreground";
 
-function buildConnectionRootPath(rootPath: string, name: string): string {
-  const base = rootPath.replace(/\//g, "\\").replace(/\\+$/, "");
-  const folder = name
-    .trim()
-    .replace(/[<>:"/\\|?*]/g, "")
-    .trim();
-  if (!base) return folder;
-  if (!folder) return base;
-  return `${base}\\${folder}`;
-}
-
-function buildConnectionDataDir(rootPath: string, name: string): string {
-  return `${buildConnectionRootPath(rootPath, name)}\\data`;
-}
-
 export function NewConnectionPage() {
   const config = useConfig();
   const { runOperation } = useBackgroundOperation();
@@ -66,6 +51,9 @@ export function NewConnectionPage() {
     resolved: boolean;
   } | null>(null);
   const [syncInstanceId, setSyncInstanceId] = useState("");
+  // Where the instance would land, derived by the backend — the only place
+  // that knows whether this platform separates paths with "/" or "\".
+  const [instancePath, setInstancePath] = useState("");
 
   const sync = useInstanceSync(syncInstanceId);
 
@@ -74,25 +62,31 @@ export function NewConnectionPage() {
     defaultValues: {
       ...newConnectionDefaultValues,
       remoteSyncPort: config?.syncPort ?? 25567,
-      instanceRootPath: buildConnectionRootPath(config?.rootPath ?? "", ""),
-      instanceDataDir: buildConnectionDataDir(config?.rootPath ?? "", ""),
     },
     mode: "onSubmit",
   });
 
   const connectionName = form.watch("connectionName");
+  const nerevarRoot = config?.rootPath ?? "";
 
   useEffect(() => {
-    const root = config?.rootPath ?? "";
-    form.setValue(
-      "instanceRootPath",
-      buildConnectionRootPath(root, connectionName),
-    );
-    form.setValue(
-      "instanceDataDir",
-      buildConnectionDataDir(root, connectionName),
-    );
-  }, [connectionName, config?.rootPath, form]);
+    let cancelled = false;
+    void invoke<string>("preview_connection_instance_path", {
+      rootPath: nerevarRoot,
+      connectionName,
+    })
+      .then((path) => {
+        if (!cancelled) setInstancePath(path);
+      })
+      .catch(() => {
+        // No name typed yet, or nothing usable survives sanitising: there is
+        // no instance folder to name, so the data directory stands alone.
+        if (!cancelled) setInstancePath(nerevarRoot);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionName, nerevarRoot]);
 
   /**
    * Preselects the runtime the host advertises, if it advertises one.
@@ -182,8 +176,9 @@ export function NewConnectionPage() {
         runtime: values.runtime,
         connectionName: values.connectionName,
         connectionDescription: values.connectionDescription,
-        instanceRootPath: values.instanceRootPath,
-        instanceDataDir: values.instanceDataDir,
+        // Just the Nerevar data directory: the command derives the
+        // instance's own paths from it and the connection name.
+        rootPath: nerevarRoot,
         remoteHost: values.remoteHost,
         remoteSyncPort: values.remoteSyncPort,
         syncPassword: values.syncPassword,
@@ -370,8 +365,9 @@ export function NewConnectionPage() {
               </FieldLabel>
               <Input
                 id="instanceRootPath"
-                disabled={busy}
-                {...form.register("instanceRootPath")}
+                value={instancePath}
+                readOnly
+                disabled
               />
             </Field>
 

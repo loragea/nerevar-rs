@@ -1,6 +1,11 @@
+mod instance_paths;
 mod required_data_files;
 mod server_cfg;
 
+pub use instance_paths::{
+    ensure_instance_path_available, instance_folder_name, instance_paths, InstancePaths,
+    INSTANCE_DATA_DIR_NAME,
+};
 pub use required_data_files::{
     build_required_data_files, write_required_data_files, write_required_data_files_for_resolved,
 };

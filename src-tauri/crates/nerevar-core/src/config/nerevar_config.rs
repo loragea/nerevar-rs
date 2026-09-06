@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 use crate::data::{InstanceConfig, NerevarConfig, NewConnectionConfig, NewInstanceConfig};
 use crate::port_conflict;
 use crate::instance_data::ensure_instance_data_layout;
-use crate::instance_setup::{apply_server_defaults, create_instance_data_dir, instance_tes3mp_dir};
+use crate::instance_setup::{
+    apply_server_defaults, create_instance_data_dir, instance_tes3mp_dir, InstancePaths,
+};
 use crate::reporter::{emit_event, EventSink};
 use crate::runtime::{self, RuntimeSource, TargetPlatform};
 use crate::AppState;
@@ -250,13 +252,19 @@ fn build_instance_config(new_instance: &NewInstanceConfig) -> InstanceConfig {
     }
 }
 
-pub fn build_synced_instance_config(new_connection: &NewConnectionConfig) -> InstanceConfig {
+/// `paths` comes from `instance_setup::instance_paths`, which derives it from
+/// the connection's `root_path` and name with the running platform's
+/// separator — the payload carries no path of its own to copy here.
+pub fn build_synced_instance_config(
+    new_connection: &NewConnectionConfig,
+    paths: &InstancePaths,
+) -> InstanceConfig {
     InstanceConfig {
         id: new_instance_id(),
         name: new_connection.connection_name.clone(),
         description: new_connection.connection_description.clone(),
-        path: new_connection.instance_root_path.clone(),
-        data_dir: new_connection.instance_data_dir.clone(),
+        path: paths.root.display().to_string(),
+        data_dir: paths.data_dir.display().to_string(),
         release_id: new_connection.runtime.legacy_release_id(),
         runtime: Some(new_connection.runtime.clone()),
         runtime_hint: None,

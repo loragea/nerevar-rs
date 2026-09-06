@@ -331,6 +331,7 @@ pub fn run() {
             sync_host::commands::activate_hosting_instance,
             sync_host::commands::clear_hosting_instance,
             sync_host::commands::get_sync_host_status,
+            connection::commands::preview_connection_instance_path,
             connection::commands::ping_remote_nerevar_server,
             connection::commands::fetch_remote_manifest_summary,
             connection::commands::add_synced_connection,

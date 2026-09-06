@@ -13,8 +13,8 @@ use crate::instance_data::{
     load_manifest, resolve_package_data_dir, ManifestValidationResult,
 };
 use crate::instance_setup::{
-    create_instance_data_dir, instance_tes3mp_dir, write_owned_client_connection,
-    write_tes3mp_client_connection,
+    create_instance_data_dir, ensure_instance_path_available, instance_paths, instance_tes3mp_dir,
+    write_owned_client_connection, write_tes3mp_client_connection,
 };
 use crate::instance_data::ensure_instance_data_layout;
 use crate::process_manager::{
@@ -51,6 +51,22 @@ pub async fn fetch_remote_manifest_summary(
     .await
 }
 
+/// The instance directory a connection with this name would get, for the
+/// page to show before the user submits.
+///
+/// The same `instance_paths` call the create itself makes, so the preview
+/// cannot drift from the path that ends up on disk.
+#[tauri::command]
+pub fn preview_connection_instance_path(
+    root_path: String,
+    connection_name: String,
+) -> Result<String, String> {
+    Ok(instance_paths(Path::new(&root_path), &connection_name)?
+        .root
+        .display()
+        .to_string())
+}
+
 /// Creates a synced instance for a remote host: instance tree, TES3MP
 /// runtime, client cfg pointed at the host, then the config entry.
 ///
@@ -63,13 +79,12 @@ pub async fn add_synced_connection(
     new_connection: NewConnectionConfig,
     operation_id: Option<String>,
 ) -> Result<String, String> {
-    let instance_root = Path::new(&new_connection.instance_root_path);
-    if instance_root.exists() {
-        return Err(format!(
-            "Instance path already exists: {}",
-            instance_root.display()
-        ));
-    }
+    let paths = instance_paths(
+        Path::new(&new_connection.root_path),
+        &new_connection.connection_name,
+    )?;
+    let instance_root = paths.root.as_path();
+    ensure_instance_path_available(instance_root)?;
 
     ping_nerevar_server(&new_connection.remote_host, new_connection.remote_sync_port).await?;
     let summary = fetch_manifest_summary(
@@ -93,7 +108,7 @@ pub async fn add_synced_connection(
 
     if let Err(err) = (async {
         std::fs::create_dir_all(instance_root).map_err(|e| e.to_string())?;
-        let instance_data_dir = Path::new(&new_connection.instance_data_dir);
+        let instance_data_dir = paths.data_dir.as_path();
         create_instance_data_dir(instance_data_dir)?;
         ensure_instance_data_layout(instance_data_dir)?;
 
@@ -130,7 +145,7 @@ pub async fn add_synced_connection(
         return Err(err);
     }
 
-    let mut instance = build_synced_instance_config(&new_connection);
+    let mut instance = build_synced_instance_config(&new_connection, &paths);
     instance.tes3mp_server_port = Some(summary.tes3mp_server_port);
     let instance_id = instance.id.clone();
     let (config, sink) = persist_synced_instance_to_config(state.inner(), instance)?;
