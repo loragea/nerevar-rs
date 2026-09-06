@@ -6,6 +6,7 @@ mod instance;
 mod manifest;
 mod signal;
 mod sink;
+mod tls;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -17,6 +18,7 @@ use nerevar_core::admin::ServerRestartState;
 use nerevar_core::instance_data::resolve_package_data_dir;
 use nerevar_core::instance_setup::{instance_tes3mp_dir, read_tes3mp_server_settings};
 use nerevar_core::nerevar_server::state::ServerContext;
+use nerevar_core::nerevar_server::{PlainHttp, Transport};
 use nerevar_core::process_manager::{launch_tes3mp_server, ProcessManager, ProcessRole};
 use nerevar_core::reporter::EventSink;
 use nerevar_core::runtime::normalize_runtime_hint;
@@ -76,6 +78,12 @@ async fn run(cli: Cli) -> Result<i32, String> {
         return admin::run(&cli, action);
     }
 
+    // Half a --tls-cert/--tls-key pair is a config error, and the config
+    // lives on the command line (or in NEREVAR_TLS_CERT/NEREVAR_TLS_KEY):
+    // config.json is the GUI's file, shared with desktop users, so host-only
+    // TLS paths do not belong in it.
+    let tls = tls::TlsSettings::from_flags(cli.tls_cert.as_deref(), cli.tls_key.as_deref())?;
+
     let resolved = config::resolve_and_load_config(cli.config.as_deref())?;
     let instance = instance::select_owned_instance(&resolved.config, cli.instance.as_deref())?;
     let sync_port = cli.port.unwrap_or(resolved.config.sync_port);
@@ -91,7 +99,7 @@ async fn run(cli: Cli) -> Result<i32, String> {
     }
 
     if cli.check {
-        let ok = check::run_check(&resolved, instance, sync_port);
+        let ok = check::run_check(&resolved, instance, sync_port, tls.as_ref());
         return Ok(if ok { 0 } else { 1 });
     }
 
@@ -128,6 +136,22 @@ async fn run(cli: Cli) -> Result<i32, String> {
             );
         }
     }
+
+    // Loaded before anything is bound or launched: a certificate the daemon
+    // cannot serve is a config failure (exit 1), not a half-started host.
+    let transport: Arc<dyn Transport> = match &tls {
+        Some(settings) => {
+            let loaded = settings.load()?;
+            log::info!(
+                "TLS certificate {}: {}",
+                loaded.cert_path.display(),
+                loaded.leaf.describe()
+            );
+            loaded.warn_if_expiring_soon();
+            Arc::new(loaded.into_transport())
+        }
+        None => Arc::new(PlainHttp),
+    };
 
     let sync_host = new_shared_sync_host();
     let manifest_cache = new_shared_hosting_manifest_cache();
@@ -174,7 +198,9 @@ async fn run(cli: Cli) -> Result<i32, String> {
         sink.clone(),
     )?;
     log::info!(
-        "Sync hosting active for instance \"{instance_name}\" ({instance_id}) on port {sync_port}"
+        "Sync hosting active for instance \"{instance_name}\" ({instance_id}) on port {sync_port} \
+         ({scheme})",
+        scheme = if tls.is_some() { "https" } else { "http" }
     );
 
     // The same `Arc` the `/admin` routes hold: it says whether there is a
@@ -188,6 +214,7 @@ async fn run(cli: Cli) -> Result<i32, String> {
         enabled_rx,
         server_ctx,
         sink.clone(),
+        transport,
     ));
 
     if cli.sync_only {
@@ -235,8 +262,7 @@ async fn run(cli: Cli) -> Result<i32, String> {
         // wrapper script, and TES3MP's real ELF runs as its child, so the
         // wrapper dying does not guarantee the game port is free. A
         // process-group kill is the only thing that reliably reaps both.
-        match process_manager.stop_blocking(Some(sink.clone()), &instance_id, ProcessRole::Server)
-        {
+        match process_manager.stop_blocking(Some(sink.clone()), &instance_id, ProcessRole::Server) {
             Ok(true) => log::info!("TES3MP dedicated server stopped"),
             Ok(false) => log::warn!("TES3MP dedicated server was not running at shutdown"),
             Err(err) => log::error!("Failed to stop TES3MP dedicated server: {err}"),

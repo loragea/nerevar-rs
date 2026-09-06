@@ -9,8 +9,9 @@
 //!
 //! [`base_url`] is the single place those rules live: every sync request in
 //! `fetch.rs` and `download.rs` is built on what it returns, and the frontend's
-//! form validation mirrors it. The daemon itself always speaks plain HTTP —
-//! TLS is the operator's proxy, never Nerevar's.
+//! form validation mirrors it. A `https://` address reaches either a reverse
+//! proxy or a `nerevar-host` serving TLS natively (`--tls-cert`/`--tls-key`);
+//! the client cannot tell the two apart and does not need to.
 
 /// True when `host` is a full URL rather than a bare hostname or IP — i.e. when
 /// the configured sync port plays no part in the address.

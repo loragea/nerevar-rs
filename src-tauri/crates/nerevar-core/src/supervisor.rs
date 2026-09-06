@@ -33,22 +33,29 @@ pub async fn probe_startup_port_conflicts(config: NerevarConfig, sink: Arc<dyn E
 /// current value once `enabled_rx` is true, and restarts it whenever
 /// `port_rx`, `retry_rx`, or `enabled_rx` change. Runs until any of the
 /// three watch channels closes.
+///
+/// `transport` decides what the bound listener speaks. The desktop app passes
+/// [`nerevar_server::PlainHttp`]; `nerevar-host` passes its rustls transport
+/// when the operator configured a certificate. Binding, port-conflict
+/// reporting, and the restart logic below are the same either way.
 pub async fn run_server_supervisor(
     mut port_rx: watch::Receiver<i32>,
     mut retry_rx: watch::Receiver<u64>,
     mut enabled_rx: watch::Receiver<bool>,
     ctx: Arc<nerevar_server::state::ServerContext>,
     sink: Arc<dyn EventSink>,
+    transport: Arc<dyn nerevar_server::Transport>,
 ) {
     let mut current_task: Option<tokio::task::JoinHandle<()>>;
 
     let start = |port: i32,
                  ctx: Arc<nerevar_server::state::ServerContext>,
-                 sink: Arc<dyn EventSink>| {
+                 sink: Arc<dyn EventSink>,
+                 transport: Arc<dyn nerevar_server::Transport>| {
         tokio::spawn(async move {
             match nerevar_server::try_bind(port).await {
                 Ok(listener) => {
-                    if let Err(err) = nerevar_server::serve(listener, ctx).await {
+                    if let Err(err) = transport.serve(listener, ctx).await {
                         log::error!("NEREVAR SERVER: stopped on port {port}: {err}");
                     }
                 }
@@ -92,7 +99,7 @@ pub async fn run_server_supervisor(
 
     if *enabled_rx.borrow() {
         log::info!("NEREVAR SERVER: starting on port {port}");
-        current_task = Some(start(port, ctx.clone(), sink.clone()));
+        current_task = Some(start(port, ctx.clone(), sink.clone(), transport.clone()));
     } else {
         log::info!("NEREVAR SERVER: waiting for onboarding to complete");
         current_task = None;
@@ -120,7 +127,7 @@ pub async fn run_server_supervisor(
                     task.abort();
                 }
                 current_task =
-                    Some(start(port, ctx.clone(), sink.clone()));
+                    Some(start(port, ctx.clone(), sink.clone(), transport.clone()));
             }
             changed = port_rx.changed() => {
                 if changed.is_err() {
@@ -137,7 +144,7 @@ pub async fn run_server_supervisor(
                     task.abort();
                 }
                 current_task =
-                    Some(start(port, ctx.clone(), sink.clone()));
+                    Some(start(port, ctx.clone(), sink.clone(), transport.clone()));
             }
             changed = retry_rx.changed() => {
                 if changed.is_err() {
@@ -153,7 +160,7 @@ pub async fn run_server_supervisor(
                     task.abort();
                 }
                 current_task =
-                    Some(start(port, ctx.clone(), sink.clone()));
+                    Some(start(port, ctx.clone(), sink.clone(), transport.clone()));
             }
         }
     }

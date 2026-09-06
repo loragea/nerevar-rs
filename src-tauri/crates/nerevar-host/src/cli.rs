@@ -51,6 +51,18 @@ pub struct Cli {
     /// exit 0/1 without starting any servers.
     #[arg(long)]
     pub check: bool,
+
+    /// PEM certificate chain to serve the sync port with (certbot's
+    /// fullchain.pem). Requires --tls-key. With both set the sync port
+    /// speaks HTTPS and nothing else — there is no plain-HTTP fallback and
+    /// no second port. Renewing a certificate needs a daemon restart.
+    #[arg(long, value_name = "PATH", env = "NEREVAR_TLS_CERT")]
+    pub tls_cert: Option<PathBuf>,
+
+    /// PEM private key for --tls-cert: PKCS#8 ("BEGIN PRIVATE KEY") or RSA
+    /// ("BEGIN RSA PRIVATE KEY"). Requires --tls-cert.
+    #[arg(long, value_name = "PATH", env = "NEREVAR_TLS_KEY")]
+    pub tls_key: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug)]
