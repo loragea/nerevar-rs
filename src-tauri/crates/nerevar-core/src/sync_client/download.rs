@@ -36,8 +36,20 @@ fn sync_download_client() -> Result<Client, String> {
 }
 
 pub enum DownloadOutcome {
-    Complete { bytes_done: u64 },
-    Cancelled { bytes_done: u64, bytes_total: u64 },
+    /// `bytes_done` is every manifest byte now on disk — the bytes adopted from
+    /// files that were already verified included — which is what the
+    /// Downloading-phase events count against `manifest.total_download_bytes`.
+    /// `bytes_transferred` is only what this run pulled over the network. A
+    /// `Complete` outcome means every planned job finished, so
+    /// `bytes_transferred` is also the number of bytes this run needed to move.
+    Complete {
+        bytes_done: u64,
+        bytes_transferred: u64,
+    },
+    Cancelled {
+        bytes_done: u64,
+        bytes_total: u64,
+    },
 }
 
 struct ProgressThrottler {
@@ -400,6 +412,7 @@ pub async fn download_manifest_files(
         state.flush()?;
         return Ok(DownloadOutcome::Complete {
             bytes_done: bytes_done.load(Ordering::Relaxed),
+            bytes_transferred: 0,
         });
     }
 
@@ -483,8 +496,12 @@ pub async fn download_manifest_files(
         None,
     );
 
+    let final_bytes_done = bytes_done.load(Ordering::Relaxed);
     Ok(DownloadOutcome::Complete {
-        bytes_done: bytes_done.load(Ordering::Relaxed),
+        bytes_done: final_bytes_done,
+        // The counter was seeded with `skipped_bytes` and only ever grows by the
+        // length of a downloaded file, so the difference is exactly what moved.
+        bytes_transferred: final_bytes_done.saturating_sub(skipped_bytes),
     })
 }
 

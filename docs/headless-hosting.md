@@ -16,6 +16,7 @@ stderr, exits on SIGTERM, and lets systemd do the rest.
 - [Install the binary](#install-the-binary)
 - [Set up an instance without the GUI](#set-up-an-instance-without-the-gui)
 - [Run it](#run-it)
+- [Co-admins](#co-admins)
 - [Run it under systemd](#run-it-under-systemd)
 - [Day-2 operations](#day-2-operations)
 - [Ports](#ports)

@@ -472,9 +472,11 @@ async fn cancel_mid_flight_yields_cancelled_outcome() {
 /// Note on the byte accounting: the engine seeds `bytes_done` with the bytes of every
 /// already-verified file (`skipped_bytes`), so a resumed run's `Complete { bytes_done }`
 /// equals the manifest total exactly as a from-empty run's does. `bytes_done` therefore
-/// cannot distinguish a skip from a re-download; the observable that can is the first
+/// cannot distinguish a skip from a re-download. Two observables can: the first
 /// Downloading-phase event, whose `filesDone`/`bytesDone` are the skip counts and whose
-/// message is "Resuming download — N files remaining".
+/// message is "Resuming download — N files remaining", and `Complete { bytes_transferred }`,
+/// which counts only what this run pulled over the network — asserted below to be the
+/// manifest total minus what the resume adopted.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn resume_adopts_completed_files_and_finishes() {
     let harness = Harness::start("resume").await;
@@ -488,13 +490,20 @@ async fn resume_adopts_completed_files_and_finishes() {
     let cancel = Arc::new(AtomicBool::new(false));
     let outcome = harness.run_engine(sink.clone(), cancel, false).await;
 
-    let bytes_done = match outcome {
-        DownloadOutcome::Complete { bytes_done } => bytes_done,
+    let (bytes_done, bytes_transferred) = match outcome {
+        DownloadOutcome::Complete {
+            bytes_done,
+            bytes_transferred,
+        } => (bytes_done, bytes_transferred),
         DownloadOutcome::Cancelled { .. } => panic!("resume run must not be cancelled"),
     };
     assert_eq!(
         bytes_done, harness.manifest.total_download_bytes,
         "a resumed Complete still accounts for every manifest byte (skips included)"
+    );
+    assert!(
+        bytes_transferred > 0 && bytes_transferred < bytes_done,
+        "a resumed run transfers only the remainder: {bytes_transferred} of {bytes_done}"
     );
 
     let downloading = phase_events(&sink, "downloading");
@@ -518,6 +527,13 @@ async fn resume_adopts_completed_files_and_finishes() {
     assert!(
         as_u64(first, "bytesDone") > 0,
         "resume starts with the adopted bytes already counted"
+    );
+    // The first Downloading event's `bytesDone` IS `skipped_bytes`, so this pins
+    // `bytes_transferred` to the exact remainder rather than merely "less than the total".
+    assert_eq!(
+        bytes_done - bytes_transferred,
+        as_u64(first, "bytesDone"),
+        "bytes_transferred must be the manifest total minus the adopted bytes"
     );
     assert!(
         message(first).starts_with("Resuming download"),
@@ -576,7 +592,7 @@ async fn resume_adopts_files_present_on_disk_without_state() {
         .await;
 
     match outcome {
-        DownloadOutcome::Complete { bytes_done } => {
+        DownloadOutcome::Complete { bytes_done, .. } => {
             assert_eq!(bytes_done, harness.manifest.total_download_bytes)
         }
         DownloadOutcome::Cancelled { .. } => panic!("adoption run must not be cancelled"),
@@ -639,7 +655,7 @@ async fn resume_redownloads_corrupt_file() {
     let cancel = Arc::new(AtomicBool::new(false));
     let outcome = harness.run_engine(sink.clone(), cancel, false).await;
     match outcome {
-        DownloadOutcome::Complete { bytes_done } => {
+        DownloadOutcome::Complete { bytes_done, .. } => {
             assert_eq!(bytes_done, harness.manifest.total_download_bytes)
         }
         DownloadOutcome::Cancelled { .. } => panic!("repair run must not be cancelled"),
@@ -717,7 +733,7 @@ async fn stale_verified_state_entry_is_trusted_until_a_forced_sync() {
         .run_engine(sink.clone(), Arc::new(AtomicBool::new(false)), true)
         .await;
     match outcome {
-        DownloadOutcome::Complete { bytes_done } => {
+        DownloadOutcome::Complete { bytes_done, .. } => {
             assert_eq!(bytes_done, harness.manifest.total_download_bytes)
         }
         DownloadOutcome::Cancelled { .. } => panic!("forced run must not be cancelled"),
@@ -736,6 +752,11 @@ async fn stale_verified_state_entry_is_trusted_until_a_forced_sync() {
 /// completed, the next one compares the persisted manifest against the served one, finds
 /// sync-state complete, reports "Already up to date" and never enters the Downloading
 /// phase.
+///
+/// Also DECIDES the terminal event's byte counters: `Complete` reports what the sync
+/// transferred over what it needed to transfer, NOT the size of the manifest. A from-empty
+/// run therefore reports the manifest total, and the short-circuiting second run reports
+/// `0`/`0` — it moved nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sync_if_needed_reports_already_up_to_date_on_the_second_call() {
     let harness = Harness::start("sync-if-needed").await;
@@ -776,6 +797,18 @@ async fn sync_if_needed_reports_already_up_to_date_on_the_second_call() {
         !phase_events(&first_sink, "downloading").is_empty(),
         "the first sync must actually download"
     );
+    let first_complete = phase_events(&first_sink, "complete");
+    assert_eq!(first_complete.len(), 1, "one terminal event per sync");
+    assert_eq!(
+        as_u64(&first_complete[0], "bytesDone"),
+        harness.manifest.total_download_bytes,
+        "a from-empty sync transferred every manifest byte"
+    );
+    assert_eq!(
+        as_u64(&first_complete[0], "bytesTotal"),
+        harness.manifest.total_download_bytes,
+        "and needed to transfer exactly that many"
+    );
 
     let second_sink = Arc::new(CollectingEventSink::default());
     let second = sync_if_needed(second_sink.clone(), coordinator, &instance, false)
@@ -793,6 +826,21 @@ async fn sync_if_needed_reports_already_up_to_date_on_the_second_call() {
         "expected exactly one Complete event, got {complete:?}"
     );
     assert_eq!(message(&complete[0]), "Already up to date");
+    assert_eq!(
+        as_u64(&complete[0], "bytesDone"),
+        0,
+        "an up-to-date sync transferred nothing"
+    );
+    assert_eq!(
+        as_u64(&complete[0], "bytesTotal"),
+        0,
+        "and needed to transfer nothing — not the manifest total"
+    );
+    assert_eq!(
+        as_u64(&complete[0], "overallPercent"),
+        100,
+        "a Complete event is 100% however few bytes moved"
+    );
 
     harness.teardown();
 }
