@@ -124,13 +124,15 @@ async fn sync_if_needed_inner(
     if let (false, Some(local)) = (needs_download, local_manifest.as_ref()) {
         // `needs_download == false` implies a local manifest exists (see the
         // match above), so this arm is the only reachable "nothing to do" path.
+        // Nothing was transferred and nothing needed to be: the terminal event
+        // reports this sync's transfer, not the size of the manifest.
         emit_sync_progress(
             &*sink,
             instance_id,
             SyncPhase::Complete,
             "Already up to date",
-            1,
-            1,
+            0,
+            0,
             0,
             0,
             None,
@@ -190,8 +192,11 @@ async fn sync_if_needed_inner(
     )
     .await?;
 
-    match download_result {
-        DownloadOutcome::Complete { bytes_done } => {
+    let bytes_transferred = match download_result {
+        DownloadOutcome::Complete {
+            bytes_done,
+            bytes_transferred,
+        } => {
             emit_sync_progress(
                 &*sink,
                 instance_id,
@@ -203,6 +208,7 @@ async fn sync_if_needed_inner(
                 0,
                 None,
             );
+            bytes_transferred
         }
         DownloadOutcome::Cancelled {
             bytes_done,
@@ -244,7 +250,7 @@ async fn sync_if_needed_inner(
             );
             return Err("Sync cancelled".to_string());
         }
-    }
+    };
 
     if cancel.load(Ordering::Relaxed) {
         return Err("Sync cancelled".to_string());
@@ -294,13 +300,18 @@ async fn sync_if_needed_inner(
     }
 
     finalize_after_sync(instance, data_dir, &remote)?;
+    // The terminal event answers "what did this sync move?", so it reports the
+    // bytes transferred rather than the manifest total — a run that downloaded
+    // one 362-byte file reports 362/362, not the whole modlist's size. A
+    // `Complete` download outcome moved every byte it planned to, so the
+    // transferred count is both the done and the total here.
     emit_sync_progress(
         &*sink,
         instance_id,
         SyncPhase::Complete,
         "Sync complete",
-        remote.total_download_bytes.max(1),
-        remote.total_download_bytes.max(1),
+        bytes_transferred,
+        bytes_transferred,
         0,
         0,
         None,

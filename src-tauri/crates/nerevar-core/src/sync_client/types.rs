@@ -26,6 +26,17 @@ pub struct SyncProgressEvent {
     pub instance_id: String,
     pub phase: SyncPhase,
     pub message: String,
+    /// Byte counters, whose meaning follows the phase:
+    ///
+    /// - `VerifyingExisting`, `Downloading`, `ApplyingLoadOrder`, `Cancelled`
+    ///   and the resuming `CheckingUpdates` event count every manifest byte
+    ///   confirmed on disk (bytes adopted from files that were already correct
+    ///   included) against the manifest total. That is what drives the download
+    ///   bar and the resume percentage.
+    /// - `Complete` counts what *this* sync transferred against what it needed
+    ///   to transfer, so a sync that found everything already in place reports
+    ///   `0`/`0` rather than the size of the modlist.
+    /// - The remaining events carry no byte progress and report `0`/`1`.
     pub bytes_done: u64,
     pub bytes_total: u64,
     #[serde(default)]

@@ -281,7 +281,7 @@ async fn host_client_sync_roundtrip() {
     .expect("engine download should succeed");
 
     let engine_bytes_done = match outcome {
-        DownloadOutcome::Complete { bytes_done } => bytes_done,
+        DownloadOutcome::Complete { bytes_done, .. } => bytes_done,
         DownloadOutcome::Cancelled { .. } => panic!("engine download must not be cancelled"),
     };
     assert_eq!(
@@ -394,7 +394,7 @@ async fn host_client_sync_roundtrip() {
     .await
     .expect("URL host must drive the download engine");
     match url_outcome {
-        DownloadOutcome::Complete { bytes_done } => assert_eq!(
+        DownloadOutcome::Complete { bytes_done, .. } => assert_eq!(
             bytes_done, expected_total_bytes,
             "URL-host download should report every byte"
         ),
