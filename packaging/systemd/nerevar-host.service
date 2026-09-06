@@ -33,6 +33,15 @@ StandardError=journal
 SyslogIdentifier=nerevar-host
 Environment=RUST_LOG=info
 
+# HTTPS on the sync port: uncomment both (one without the other is a startup
+# error) and point them at a full certificate chain and its private key.
+# ExecStartPre sees them too, so --check validates the pair before any port is
+# bound. The key must be readable by the User= above. Certbot, the ACL that
+# grants that access, and the restart a renewed certificate needs: the HTTPS
+# section of docs/headless-hosting.md.
+#Environment=NEREVAR_TLS_CERT=/etc/letsencrypt/live/<host>/fullchain.pem
+#Environment=NEREVAR_TLS_KEY=/etc/letsencrypt/live/<host>/privkey.pem
+
 # Exit 0 = asked to stop (SIGTERM). Exit 1 = startup/config failure. Exit 69 =
 # the TES3MP dedicated server died on its own, and the daemon shut sync hosting
 # down with it rather than sit there looking healthy — restarting is exactly
