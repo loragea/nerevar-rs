@@ -1,6 +1,7 @@
 import type {
   InstanceSyncStatus,
-  ManifestValidationResult,
+  RuntimeMismatch,
+  SyncOutcome,
   SyncProgressEvent,
 } from "@/types";
 import { invoke } from "@tauri-apps/api/core";
@@ -20,8 +21,12 @@ export function useInstanceSync(instanceId: string) {
   const [resumeStatus, setResumeStatus] = useState<InstanceSyncStatus | null>(
     null,
   );
-  const [lastValidation, setLastValidation] =
-    useState<ManifestValidationResult | null>(null);
+  const [lastOutcome, setLastOutcome] = useState<SyncOutcome | null>(null);
+  // The TES3MP version this instance's host requires, when it is not the one
+  // installed. Set from core's `runtime-mismatch` event so it is picked up
+  // whether the sync was started from the Sync button or by a launch.
+  const [runtimeMismatch, setRuntimeMismatch] =
+    useState<RuntimeMismatch | null>(null);
 
   const refreshResumeStatus = useCallback(async () => {
     if (!instanceId) {
@@ -44,6 +49,16 @@ export function useInstanceSync(instanceId: string) {
   }, [refreshResumeStatus]);
 
   useEffect(() => {
+    const unlisten = listen<RuntimeMismatch>("runtime-mismatch", (event) => {
+      if (event.payload.instanceId !== instanceId) return;
+      setRuntimeMismatch(event.payload);
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, [instanceId]);
+
+  useEffect(() => {
     const unlisten = listen<SyncProgressEvent>("sync-progress", (event) => {
       if (event.payload.instanceId !== instanceId) return;
       setProgress(event.payload);
@@ -63,22 +78,25 @@ export function useInstanceSync(instanceId: string) {
       throw new Error("No instance id");
     }
     setSyncing(true);
-    setLastValidation(null);
+    setLastOutcome(null);
+    setRuntimeMismatch(null);
     setProgress(null);
     try {
-      const validation = await invoke<ManifestValidationResult>(
-        "sync_instance_from_remote",
-        { instanceId: targetId },
-      );
-      setLastValidation(validation);
-      if (validation.valid) {
-        toast.success("Sync complete — files verified");
-      } else {
+      const outcome = await invoke<SyncOutcome>("sync_instance_from_remote", {
+        instanceId: targetId,
+      });
+      setLastOutcome(outcome);
+      setRuntimeMismatch(outcome.runtimeMismatch ?? null);
+      if (!outcome.validation.valid) {
         toast.error(
-          `Sync finished with ${validation.issues.length} validation issue(s)`,
+          `Sync finished with ${outcome.validation.issues.length} validation issue(s)`,
         );
+      } else if (outcome.runtimeMismatch) {
+        toast.warning(outcome.runtimeMismatch.message);
+      } else {
+        toast.success("Sync complete — files verified");
       }
-      return validation;
+      return outcome;
     } catch (error) {
       const message = String(error);
       if (!message.toLowerCase().includes("cancelled")) {
@@ -105,7 +123,9 @@ export function useInstanceSync(instanceId: string) {
     progress,
     syncing,
     resumeStatus,
-    lastValidation,
+    lastOutcome,
+    runtimeMismatch,
+    clearRuntimeMismatch: useCallback(() => setRuntimeMismatch(null), []),
     refreshResumeStatus,
     startSync,
     cancelSync,

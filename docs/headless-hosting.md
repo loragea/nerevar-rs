@@ -136,9 +136,26 @@ port, distinct from the TES3MP game port. `id` is what `--instance` matches
 Players pull their own TES3MP build; the host never sends one. If your server
 needs a particular build — a fork that publishes its runtime as GitHub
 releases in its own repository, say — add a `runtimeHint` to the instance and
-the daemon advertises it in the manifest summary. A connecting player's
-runtime picker preselects that repository and release and says the suggestion
-came from you; they can still choose anything else.
+the daemon advertises it in the manifest summary.
+
+**What a host controls is the version, not where it comes from.** A client
+ships its own list of trusted runtime repositories (the official
+`tes3mp/tes3mp`, plus any a player has added under **Settings → Trusted
+runtime sources**), and a hint may only *select among* those. Hint a
+repository the player trusts and their picker preselects it with the release
+you named; hint anything else and the client says your suggestion was not one
+of its trusted sources, preselects the official repository with no release
+chosen, and downloads nothing from yours. That is deliberate: a host that
+could name the repository could name one whose "TES3MP" is any executable it
+likes.
+
+The `tag`, though, is honoured either way. At every sync a connected client
+compares it against the build it has installed and, when they differ, offers
+to install the required version — from *its* repository for this instance —
+and refuses to launch until it has. So a fork server's players need to add
+the fork's repository once, in Settings, before the hint does anything;
+without that they get the message and no download. Tell them the repository
+slug out of band, alongside your address and password.
 
 ```json
 {
@@ -158,10 +175,11 @@ came from you; they can still choose anything else.
 
 `repo` is `owner/name`; `tag` is the release tag as published there, and is
 what the client matches against the repository's releases (`releaseId` may be
-left empty). Only `"kind": "githubRelease"` can be advertised — a path on this
+left empty) *and* what it enforces against every connected player's installed
+runtime. Only `"kind": "githubRelease"` can be advertised — a path on this
 machine means nothing on a player's — and the repository must be public, since
 Nerevar does not sign in to GitHub. Omit the key entirely to suggest nothing,
-which is the default. `--check` reports what will be advertised, and says so
+which is the default; omit `tag` and you pin no version. `--check` reports what will be advertised, and says so
 when a hint is unusable and will be ignored:
 
 ```

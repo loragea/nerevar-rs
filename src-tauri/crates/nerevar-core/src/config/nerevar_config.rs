@@ -2,14 +2,17 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::data::{InstanceConfig, NerevarConfig, NewConnectionConfig, NewInstanceConfig};
-use crate::port_conflict;
 use crate::instance_data::ensure_instance_data_layout;
 use crate::instance_setup::{
     apply_server_defaults, create_instance_data_dir, instance_tes3mp_dir, unique_instance_name,
     InstancePaths,
 };
+use crate::port_conflict;
 use crate::reporter::{emit_event, EventSink};
-use crate::runtime::{self, RuntimeSource, TargetPlatform};
+use crate::runtime::{
+    self, add_trusted_repo, remove_trusted_repo, trusted_repos, RuntimeSource, TargetPlatform,
+    TrustedRepo, TrustedRuntimeRepos,
+};
 use crate::AppState;
 use log::info;
 use uuid::Uuid;
@@ -62,8 +65,8 @@ pub fn default_instances_dir_under(user_data_dir: &Path) -> PathBuf {
 
 /// [`default_instances_dir_under`] applied to this user's data directory.
 pub fn default_instances_dir() -> Result<PathBuf, String> {
-    let user_data_dir = dirs::data_dir()
-        .ok_or_else(|| "Failed to resolve the user data directory".to_string())?;
+    let user_data_dir =
+        dirs::data_dir().ok_or_else(|| "Failed to resolve the user data directory".to_string())?;
     Ok(default_instances_dir_under(&user_data_dir))
 }
 
@@ -89,6 +92,7 @@ pub fn load_or_create_nerevar_config_at(config_path: &Path) -> Result<NerevarCon
             root_path: None,
             sync_port: 25567,
             morrowind_data_files: None,
+            trusted_runtime_repos: Vec::new(),
         };
         std::fs::write(
             config_path,
@@ -138,7 +142,10 @@ fn migrate_runtime_sources(config: &mut NerevarConfig) {
 /// is the only place auto-creation is desired).
 pub fn load_nerevar_config_at(config_path: &Path) -> Result<NerevarConfig, String> {
     if !config_path.exists() {
-        return Err(format!("Config file not found at {}", config_path.display()));
+        return Err(format!(
+            "Config file not found at {}",
+            config_path.display()
+        ));
     }
     let contents = std::fs::read_to_string(config_path).map_err(|e| e.to_string())?;
     info!("Loading config file from {}", config_path.display());
@@ -147,9 +154,7 @@ pub fn load_nerevar_config_at(config_path: &Path) -> Result<NerevarConfig, Strin
     Ok(config)
 }
 
-pub fn load_or_create_nerevar_config(
-    state: &Mutex<AppState>,
-) -> Result<NerevarConfig, String> {
+pub fn load_or_create_nerevar_config(state: &Mutex<AppState>) -> Result<NerevarConfig, String> {
     let config_path = state.lock().unwrap().nerevar_config_path.clone();
     load_or_create_nerevar_config_at(Path::new(&config_path))
 }
@@ -289,6 +294,65 @@ pub async fn set_sync_port(state: &Mutex<AppState>, port: i32) -> Result<(), Str
     }
 
     Ok(())
+}
+
+/// The repositories this player trusts for TES3MP runtimes.
+pub fn list_trusted_runtime_repos(state: &Mutex<AppState>) -> Result<Vec<TrustedRepo>, String> {
+    let guard = state
+        .lock()
+        .map_err(|_| "App state lock poisoned".to_string())?;
+    Ok(trusted_repos(&guard.nerevar_config))
+}
+
+/// Adds a repository to the player's trusted runtime sources and saves the
+/// config, returning the list as it now stands.
+///
+/// Deliberate and player-initiated by construction: nothing else in Nerevar
+/// calls this, so no host, manifest, or hint can widen the list.
+pub fn trust_runtime_repo(
+    state: &Mutex<AppState>,
+    repo: String,
+) -> Result<Vec<TrustedRepo>, String> {
+    mutate_trusted_repos(state, |config| add_trusted_repo(config, &repo).map(|_| ()))
+}
+
+/// Removes a player-added repository from the trusted runtime sources.
+pub fn untrust_runtime_repo(
+    state: &Mutex<AppState>,
+    repo: String,
+) -> Result<Vec<TrustedRepo>, String> {
+    mutate_trusted_repos(state, |config| remove_trusted_repo(config, &repo))
+}
+
+/// Applies a change to the trust list, persists the config and tells the
+/// frontend — the shape both trust commands share.
+fn mutate_trusted_repos(
+    state: &Mutex<AppState>,
+    change: impl FnOnce(&mut NerevarConfig) -> Result<(), String>,
+) -> Result<Vec<TrustedRepo>, String> {
+    let (config_path, config_snapshot, sink) = {
+        let mut guard = state
+            .lock()
+            .map_err(|_| "App state lock poisoned".to_string())?;
+        change(&mut guard.nerevar_config)?;
+        (
+            guard.nerevar_config_path.clone(),
+            guard.nerevar_config.clone(),
+            guard.event_sink.clone(),
+        )
+    };
+
+    std::fs::write(
+        Path::new(&config_path),
+        serde_json::to_string_pretty(&config_snapshot).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+
+    if let Some(sink) = sink {
+        emit_event(&*sink, "on_config_change", &config_snapshot);
+    }
+
+    Ok(trusted_repos(&config_snapshot))
 }
 
 fn new_instance_id() -> String {
@@ -500,15 +564,20 @@ pub async fn add_instance(
     }
 
     // Resolved up front rather than after the download: the runtime install
-    // reports its progress through it.
-    let sink = {
+    // reports its progress through it, and the trust list decides whether the
+    // download may happen at all.
+    let (sink, trusted) = {
         let guard = state
             .lock()
             .map_err(|_| "App state lock poisoned".to_string())?;
-        guard
+        let sink = guard
             .event_sink
             .clone()
-            .ok_or_else(|| "Event sink not initialized".to_string())?
+            .ok_or_else(|| "Event sink not initialized".to_string())?;
+        (
+            sink,
+            TrustedRuntimeRepos::from_config(&guard.nerevar_config),
+        )
     };
 
     // Filesystem setup first; only persist config after success.
@@ -527,6 +596,7 @@ pub async fn add_instance(
             TargetPlatform::current(),
             sink.clone(),
             operation_id.clone(),
+            &trusted,
         )
         .await?;
         installed.require_complete()?;
@@ -584,10 +654,8 @@ mod tests {
     }
 
     fn scratch(label: &str) -> Scratch {
-        let dir = std::env::temp_dir().join(format!(
-            "nerevar-config-{label}-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("nerevar-config-{label}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         Scratch(dir)
@@ -649,7 +717,9 @@ mod tests {
         // The same migration on the create-if-missing path.
         let created = load_or_create_nerevar_config_at(&path).expect("load");
         assert_eq!(
-            created.owned_instances.as_ref().unwrap()[0].runtime.as_ref(),
+            created.owned_instances.as_ref().unwrap()[0]
+                .runtime
+                .as_ref(),
             Some(&legacy_source())
         );
     }
@@ -727,7 +797,9 @@ mod tests {
         .unwrap();
 
         let config = load_nerevar_config_at(&path).expect("config should load");
-        assert!(config.owned_instances.as_ref().unwrap()[0].runtime.is_none());
+        assert!(config.owned_instances.as_ref().unwrap()[0]
+            .runtime
+            .is_none());
     }
 
     /// A host operator's suggestion survives a load, and an instance without
@@ -829,6 +901,7 @@ mod tests {
             root_path: Some("/instances".to_string()),
             sync_port: 25567,
             morrowind_data_files: Some("/games/Morrowind/Data Files".to_string()),
+            trusted_runtime_repos: Vec::new(),
         };
         std::fs::write(&path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
 
@@ -881,6 +954,7 @@ mod tests {
             root_path: None,
             sync_port: 25567,
             morrowind_data_files: None,
+            trusted_runtime_repos: Vec::new(),
         };
 
         assert_eq!(

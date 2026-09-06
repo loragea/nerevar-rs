@@ -33,9 +33,15 @@
 //!
 //! Output: one JSON object per line on stdout, `{"event": <name>, "payload":
 //! <value>}`, carrying every core event exactly as the app would receive it
-//! (`sync-progress`, `process-output`, `process-status`, ...), plus two of its
-//! own: `sync-result` (the `ManifestValidationResult`) and `sync-error`.
-//! Diagnostics go to stderr (`RUST_LOG=debug` for more).
+//! (`sync-progress`, `runtime-mismatch`, `process-output`, `process-status`,
+//! ...), plus two of its own: `sync-result` (the `SyncOutcome`) and
+//! `sync-error`. Diagnostics go to stderr (`RUST_LOG=debug` for more).
+//!
+//! A host may require a particular TES3MP version. When the installed runtime
+//! is not it, core emits `runtime-mismatch` and the outcome carries it:
+//! `--install-runtime` then updates the runtime from the instance's own
+//! repository before continuing, and without it a requested `--launch` is
+//! refused (exit 1) rather than starting a client the server will not have.
 //!
 //! `--launch` does the global `openmw.cfg` swap exactly like the app: it
 //! composes the profile's `openmw.nerevar.cfg` with the instance launch cfg
@@ -46,7 +52,9 @@
 //! profile.
 //!
 //! Exit codes: 0 sync ok (and, with --launch, the client exited with 0 or was
-//! stopped cleanly on a signal); 1 validation failed; 2 error.
+//! stopped cleanly on a signal); 1 validation failed, or --launch was asked
+//! for while the host requires a TES3MP version this instance does not have;
+//! 2 error.
 
 use std::io::Write;
 use std::path::Path;
@@ -59,7 +67,7 @@ use nerevar_core::instance_data::{load_manifest, resolve_package_data_dir};
 use nerevar_core::instance_setup::instance_tes3mp_dir;
 use nerevar_core::process_manager::{launch_tes3mp_client, ProcessManager, ProcessRole};
 use nerevar_core::reporter::EventSink;
-use nerevar_core::runtime::{self, TargetPlatform};
+use nerevar_core::runtime::{self, RuntimeMismatch, TargetPlatform, TrustedRuntimeRepos};
 use nerevar_core::sync_client::{
     sync_if_needed, touch_last_synced, write_synced_client_connection, SyncCoordinator,
 };
@@ -153,6 +161,7 @@ fn persist_synced_instance(
 /// directory can exist beside a runtime that was never installed.
 async fn install_runtime(
     instance: &InstanceConfig,
+    trusted: &TrustedRuntimeRepos,
     sink: Arc<dyn EventSink>,
 ) -> Result<(), String> {
     let source = instance.runtime.as_ref().ok_or_else(|| {
@@ -174,9 +183,54 @@ async fn install_runtime(
         return Ok(());
     }
 
-    let info = runtime::acquire(source, &tes3mp_dir, TargetPlatform::current(), sink, None).await?;
+    let info = runtime::acquire(
+        source,
+        &tes3mp_dir,
+        TargetPlatform::current(),
+        sink,
+        None,
+        trusted,
+    )
+    .await?;
     info.require_complete()?;
     Ok(())
+}
+
+/// What this run does about a host requiring a TES3MP version the instance
+/// does not have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MismatchAction {
+    /// Report it and carry on: either nothing is being launched, or the
+    /// mismatch is one Nerevar cannot act on (a runtime installed from the
+    /// user's own folder or archive, whose version it cannot read).
+    Report,
+    /// Install the required version first — what `--install-runtime` asks for.
+    Update,
+    /// Refuse: `--launch` was requested and nothing authorised an update, so
+    /// starting the client would connect a wrong build to the server.
+    RefuseLaunch,
+}
+
+/// Decides [`MismatchAction`] from the flags this run was given.
+///
+/// Split out from [`run`] so the decision is testable without a host, a
+/// network, or a TES3MP install: it is the whole of the CLI's version-lock
+/// policy.
+pub fn mismatch_action(
+    mismatch: &RuntimeMismatch,
+    install_runtime: bool,
+    launch: bool,
+) -> MismatchAction {
+    if !mismatch.enforced {
+        return MismatchAction::Report;
+    }
+    if install_runtime {
+        MismatchAction::Update
+    } else if launch {
+        MismatchAction::RefuseLaunch
+    } else {
+        MismatchAction::Report
+    }
 }
 
 #[cfg(unix)]
@@ -211,7 +265,8 @@ pub async fn run(args: SyncArgs) -> Result<i32, String> {
     }
 
     let mut config = load_nerevar_config_at(&args.config)?;
-    let instance = find_synced_instance(&config, &args.instance)
+    let trusted = TrustedRuntimeRepos::from_config(&config);
+    let mut instance = find_synced_instance(&config, &args.instance)
         .ok_or_else(|| format!("Synced instance not found: {}", args.instance))?;
     let instance_id = instance.id.clone();
 
@@ -220,16 +275,49 @@ pub async fn run(args: SyncArgs) -> Result<i32, String> {
     let coordinator = Arc::new(SyncCoordinator::new());
 
     if args.install_runtime {
-        install_runtime(&instance, sink.clone()).await?;
+        install_runtime(&instance, &trusted, sink.clone()).await?;
     }
 
-    let validation = sync_if_needed(sink.clone(), coordinator, &instance, args.force).await?;
+    let outcome =
+        sync_if_needed(sink.clone(), coordinator, &instance, args.force, &trusted).await?;
     print_event(
         "sync-result",
-        serde_json::to_value(&validation).map_err(|e| e.to_string())?,
+        serde_json::to_value(&outcome).map_err(|e| e.to_string())?,
     );
-    if !validation.valid {
+    if !outcome.validation.valid {
         return Ok(1);
+    }
+
+    if let Some(mismatch) = &outcome.runtime_mismatch {
+        match mismatch_action(mismatch, args.install_runtime, args.launch) {
+            MismatchAction::Report => log::warn!("{}", mismatch.message),
+            MismatchAction::RefuseLaunch => {
+                eprintln!(
+                    "nerevar-cli sync: {} Re-run with --install-runtime to install it.",
+                    mismatch.message
+                );
+                return Ok(1);
+            }
+            MismatchAction::Update => {
+                log::info!("{} Installing {}.", mismatch.message, mismatch.required_tag);
+                let source = instance.runtime.clone().ok_or_else(|| {
+                    format!("Instance {instance_id} records no runtime source to update")
+                })?;
+                let updated = runtime::update_instance_runtime(
+                    &instance_tes3mp_dir(Path::new(&instance.path)),
+                    &source,
+                    &mismatch.required_tag,
+                    &trusted,
+                    TargetPlatform::current(),
+                    sink.clone(),
+                    None,
+                )
+                .await?;
+                instance.release_id = updated.legacy_release_id();
+                instance.runtime = Some(updated);
+                persist_synced_instance(&args.config, &mut config, instance.clone())?;
+            }
+        }
     }
 
     // What `launch_instance_client` does for a remote instance once the sync

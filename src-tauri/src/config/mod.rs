@@ -18,7 +18,8 @@
 // as the dropped `sync_paths`/`openmw_ini_importer` shims in `lib.rs`.
 pub use nerevar_core::config::nerevar_config::{
     add_instance, complete_onboarding, generate_default_global_openmw_config,
-    load_or_create_nerevar_config, set_root_path, set_sync_port, update_synced_instance,
+    list_trusted_runtime_repos, load_or_create_nerevar_config, set_root_path, set_sync_port,
+    trust_runtime_repo, untrust_runtime_repo, update_synced_instance,
     validate_global_openmw_config,
 };
 

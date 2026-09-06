@@ -12,4 +12,16 @@ export type NerevarConfig = { onboardingComplete: boolean, ownedInstances: Array
  * existed, and omitted again when unset, so an older build reads a config
  * this one wrote unchanged.
  */
-morrowindDataFiles?: string | null, };
+morrowindDataFiles?: string | null, 
+/**
+ * GitHub repositories this player has chosen to trust for TES3MP
+ * runtimes, as lower-cased `owner/name`, on top of
+ * `runtime::trust::BUILTIN_TRUSTED_RUNTIME_REPOS`.
+ *
+ * A server can pin the *version* it needs but never the repository, so
+ * this list is the only thing that widens where Nerevar will download an
+ * executable from — see `runtime::trust`. Absent in every config written
+ * before the field existed, and omitted again when empty, so an older
+ * build reads a config this one wrote unchanged.
+ */
+trustedRuntimeRepos?: Array<string>, };

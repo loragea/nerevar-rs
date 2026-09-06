@@ -88,6 +88,7 @@ mod tests {
             root_path: None,
             sync_port: 25567,
             morrowind_data_files: None,
+            trusted_runtime_repos: Vec::new(),
         }
     }
 

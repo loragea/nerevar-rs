@@ -11,31 +11,40 @@ use crate::instance_data::{
     ManifestValidationResult, NerevarManifest, ResolvedOpenMwConfig,
 };
 use crate::reporter::{emit_event, EventSink};
+use crate::runtime::{runtime_mismatch, RuntimeMismatch, TrustedRuntimeRepos};
 
 use super::apply::apply_manifest_to_load_order;
 use super::coordinator::SyncCoordinator;
 use super::download::{download_manifest_files, persist_manifest, DownloadOutcome};
-use super::fetch::fetch_full_manifest;
+use super::fetch::{fetch_full_manifest, fetch_manifest_summary};
 use super::metadata::{apply_manifest_metadata, write_synced_client_connection};
 use super::progress::emit_sync_progress;
 use super::sync_state::{instance_sync_status, load_sync_state, sync_is_complete};
-use super::types::{InstanceSyncStatus, SyncPhase, SyncProgressEvent};
+use super::types::{InstanceSyncStatus, SyncOutcome, SyncPhase, SyncProgressEvent};
 
 pub async fn run_instance_sync(
     sink: Arc<dyn EventSink>,
     coordinator: Arc<SyncCoordinator>,
     instance: &InstanceConfig,
-) -> Result<ManifestValidationResult, String> {
-    sync_if_needed(sink, coordinator, instance, false).await
+    trusted: &TrustedRuntimeRepos,
+) -> Result<SyncOutcome, String> {
+    sync_if_needed(sink, coordinator, instance, false, trusted).await
 }
 
 /// When `force` is true, re-downloads every file. Otherwise resumes using sync-state checksums.
+///
+/// `trusted` is the player's trusted-repository list, which the version-lock
+/// check reads: a host may pin the TES3MP tag its players need, so every sync
+/// compares that tag against the instance's installed runtime and reports the
+/// difference — as a `runtime-mismatch` event and in the returned
+/// [`SyncOutcome`] — without ever downloading anything on the host's say-so.
 pub async fn sync_if_needed(
     sink: Arc<dyn EventSink>,
     coordinator: Arc<SyncCoordinator>,
     instance: &InstanceConfig,
     force: bool,
-) -> Result<ManifestValidationResult, String> {
+    trusted: &TrustedRuntimeRepos,
+) -> Result<SyncOutcome, String> {
     let host = instance
         .remote_host
         .as_deref()
@@ -59,6 +68,7 @@ pub async fn sync_if_needed(
         &data_dir,
         cancel.clone(),
         force,
+        trusted,
     )
     .await;
 
@@ -81,7 +91,8 @@ async fn sync_if_needed_inner(
     data_dir: &Path,
     cancel: Arc<std::sync::atomic::AtomicBool>,
     force: bool,
-) -> Result<ManifestValidationResult, String> {
+    trusted: &TrustedRuntimeRepos,
+) -> Result<SyncOutcome, String> {
     if cancel.load(Ordering::Relaxed) {
         return Err("Sync cancelled".to_string());
     }
@@ -97,6 +108,20 @@ async fn sync_if_needed_inner(
         0,
         None,
     );
+
+    // The version lock, before anything is downloaded: the summary is where
+    // the host states which TES3MP build it wants its players on.
+    let mismatch = check_runtime_version(
+        &*sink,
+        instance,
+        instance_id,
+        host,
+        port,
+        sync_password,
+        trusted,
+    )
+    .await;
+
     let remote = fetch_full_manifest(host, port, sync_password).await?;
 
     // Read the local manifest once and pass it around: the deltas below, the
@@ -138,9 +163,12 @@ async fn sync_if_needed_inner(
             None,
         );
         finalize_after_sync(instance, data_dir, local)?;
-        return Ok(ManifestValidationResult {
-            valid: true,
-            issues: Vec::new(),
+        return Ok(SyncOutcome {
+            validation: ManifestValidationResult {
+                valid: true,
+                issues: Vec::new(),
+            },
+            runtime_mismatch: mismatch,
         });
     }
 
@@ -214,8 +242,8 @@ async fn sync_if_needed_inner(
             bytes_done,
             bytes_total,
         } => {
-            let status = instance_sync_status(data_dir, &remote).unwrap_or_else(|_| {
-                InstanceSyncStatus {
+            let status =
+                instance_sync_status(data_dir, &remote).unwrap_or_else(|_| InstanceSyncStatus {
                     has_manifest: true,
                     can_resume: true,
                     is_complete: false,
@@ -228,8 +256,7 @@ async fn sync_if_needed_inner(
                     } else {
                         0
                     },
-                }
-            });
+                });
             emit_event(
                 &*sink,
                 "sync-progress",
@@ -296,7 +323,10 @@ async fn sync_if_needed_inner(
             0,
             None,
         );
-        return Ok(validation);
+        return Ok(SyncOutcome {
+            validation,
+            runtime_mismatch: mismatch,
+        });
     }
 
     finalize_after_sync(instance, data_dir, &remote)?;
@@ -316,7 +346,44 @@ async fn sync_if_needed_inner(
         0,
         None,
     );
-    Ok(validation)
+    Ok(SyncOutcome {
+        validation,
+        runtime_mismatch: mismatch,
+    })
+}
+
+/// Compares the TES3MP version the host asks for against the one this
+/// instance has installed, emitting `runtime-mismatch` when they differ.
+///
+/// A host that cannot be asked (its summary endpoint failed while the
+/// manifest still loads) pins nothing: the sync goes ahead and reports no
+/// requirement, rather than refusing to run because a check could not be made.
+async fn check_runtime_version(
+    sink: &dyn EventSink,
+    instance: &InstanceConfig,
+    instance_id: &str,
+    host: &str,
+    port: u16,
+    sync_password: Option<&str>,
+    trusted: &TrustedRuntimeRepos,
+) -> Option<RuntimeMismatch> {
+    let summary = match fetch_manifest_summary(host, port, sync_password).await {
+        Ok(summary) => summary,
+        Err(err) => {
+            log::warn!("Could not read {host}'s runtime requirement: {err}");
+            return None;
+        }
+    };
+
+    let mismatch = runtime_mismatch(
+        instance_id,
+        summary.runtime_hint.as_ref(),
+        instance.runtime.as_ref(),
+        trusted,
+    )?;
+    log::warn!("{}", mismatch.message);
+    emit_event(sink, "runtime-mismatch", &mismatch);
+    Some(mismatch)
 }
 
 fn finalize_after_sync(
@@ -334,7 +401,10 @@ fn finalize_after_sync(
         &manifest.instance_settings.openmw_cfg_overrides,
     )?;
     write_synced_client_connection(instance, manifest)?;
-    crate::instance_settings::persist_settings_from_manifest(data_dir, &manifest.instance_settings)?;
+    crate::instance_settings::persist_settings_from_manifest(
+        data_dir,
+        &manifest.instance_settings,
+    )?;
     Ok(())
 }
 
