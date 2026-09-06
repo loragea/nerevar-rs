@@ -15,6 +15,9 @@ pub fn write_synced_client_connection(
         .remote_host
         .as_deref()
         .ok_or_else(|| "Synced instance has no remote host".to_string())?;
+    // The game connection is UDP straight to TES3MP and cannot go through the
+    // HTTPS proxy a URL host names, so only the hostname carries over.
+    let game_host = super::host_address::game_host(host)?;
     let port = manifest.tes3mp_server_port;
     let password = instance
         .sync_password
@@ -23,7 +26,7 @@ pub fn write_synced_client_connection(
         .unwrap_or(manifest.tes3mp_server_password.as_str());
     crate::instance_setup::write_tes3mp_client_connection(
         &crate::instance_setup::instance_tes3mp_dir(Path::new(&instance.path)),
-        host,
+        &game_host,
         port,
         password,
     )

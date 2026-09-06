@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { HOST_ADDRESS_HELP } from "@/features/instances/schemas/host-address-schema";
 import {
   instanceEditSchema,
   type InstanceEditFormValues,
@@ -10,7 +11,7 @@ import type { InstanceConnectionSettings, InstanceEditPayload } from "@/types";
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
 import { invoke } from "@tauri-apps/api/core";
 import { Loader2, Save } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 
@@ -27,8 +28,13 @@ export function InstanceEditSection({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  const resolver = useMemo(
+    () => standardSchemaResolver(instanceEditSchema(isSynced)),
+    [isSynced],
+  );
+
   const form = useForm<InstanceEditFormValues>({
-    resolver: standardSchemaResolver(instanceEditSchema),
+    resolver,
     defaultValues: {
       name: "",
       description: "",
@@ -139,6 +145,11 @@ export function InstanceEditSection({
             disabled={loading || saving}
             {...form.register("host")}
           />
+          {isSynced ? (
+            <p className="font-serif text-sm text-foreground/60">
+              {HOST_ADDRESS_HELP}
+            </p>
+          ) : null}
           {form.formState.errors.host ? (
             <FieldError errors={[form.formState.errors.host]} />
           ) : null}

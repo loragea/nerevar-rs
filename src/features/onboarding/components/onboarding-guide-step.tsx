@@ -140,7 +140,7 @@ const CLIENT_GUIDE: GuideSectionData = {
   steps: [
     {
       title: "Create a new connection",
-      body: "From the dashboard, open Synced Instances → New Connection. Enter the host's address, Nerevar sync port, and sync password if their server requires one.",
+      body: "From the dashboard, open Synced Instances → New Connection. Enter the host's address — a hostname or IP, or a full http(s):// URL if the host sits behind a reverse proxy, in which case the sync port is ignored — plus the Nerevar sync port and the sync password if their server requires one.",
     },
     {
       title: "Initial sync",

@@ -16,6 +16,7 @@ import { useConfig } from "@/features/config/context/config-context-provider";
 import { useInstanceProcess } from "@/features/instances/hooks/use-instance-process";
 import { useProcessStatus } from "@/features/instances/context/process-status-context";
 import { useInstanceSync } from "@/features/instances/hooks/use-instance-sync";
+import { isUrlHostAddress } from "@/features/instances/schemas/host-address-schema";
 import { cn } from "@/lib/utils";
 import { InstanceConfig } from "@/types";
 import { invoke } from "@tauri-apps/api/core";
@@ -36,6 +37,15 @@ import { Link, useParams } from "wouter";
 
 const detailCardClass =
   "gap-0 border-border/80 bg-card/70 py-0 shadow-[0_0_15px_hsl(var(--accent)/0.08)] ring-1 ring-accent/20";
+
+/**
+ * How a synced instance's configured address reads in the connection summary.
+ * A URL host carries its own port, so appending the (ignored) sync port to it
+ * would print an address that means nothing.
+ */
+function formatSyncAddress(host: string, syncPort?: number | null) {
+  return isUrlHostAddress(host) ? host : `${host}:${syncPort ?? "?"}`;
+}
 
 async function activateNerevarSync(instanceId: string) {
   try {
@@ -468,7 +478,7 @@ function SyncedInstanceDetail({ instance }: { instance: InstanceConfig }) {
         title="Connection"
         description={
           instance.remoteHost
-            ? `Nerevar sync at ${instance.remoteHost}:${instance.remoteSyncPort ?? "?"} · TES3MP game port ${instance.tes3mpServerPort ?? "?"}`
+            ? `Nerevar sync at ${formatSyncAddress(instance.remoteHost, instance.remoteSyncPort)} · TES3MP game port ${instance.tes3mpServerPort ?? "?"}`
             : "Manage your link to this Nerevar server."
         }
       >

@@ -24,7 +24,7 @@ use crate::process_manager::{
 use crate::reporter::{emit_event, EventSink, TauriEventSink};
 use nerevar_core::runtime::{self, TargetPlatform};
 use crate::sync_client::{
-    fetch_manifest_summary, ping_nerevar_server, run_instance_sync, sync_if_needed,
+    fetch_manifest_summary, game_host, ping_nerevar_server, run_instance_sync, sync_if_needed,
     touch_last_synced, write_synced_client_connection, RemoteManifestSummary, SyncCoordinator,
 };
 use crate::AppState;
@@ -110,9 +110,12 @@ pub async fn add_synced_connection(
         .await?;
         installed.require_complete()?;
 
+        // The game connection is UDP straight to TES3MP: a URL host names the
+        // operator's HTTPS proxy, which only the sync traffic goes through, so
+        // the client cfg gets its hostname alone.
         write_tes3mp_client_connection(
             &tes3mp_dir,
-            &new_connection.remote_host,
+            &game_host(&new_connection.remote_host)?,
             summary.tes3mp_server_port,
             &new_connection.sync_password,
         )?;

@@ -387,12 +387,73 @@ nothing — the daemon warns once and treats those records as inert.
 ### HTTPS
 
 The daemon speaks plain **HTTP** and has no TLS of its own. On a LAN or a VPN
-that is fine. Over the internet, put a reverse proxy (nginx, Caddy) in front of
-the sync port and terminate TLS there — a bearer token in a plaintext header is
-readable by anything on the path. Pass the `Authorization` and
-`X-Nerevar-Sync-Password` headers through unchanged, and raise the proxy's
-request-body limit on `PUT /admin/packages/*` (nginx's default is 1 MiB, which
-would reject every real mod archive).
+that is fine. Over the internet it is not: both the sync password and a
+co-admin's bearer token travel in plaintext headers, readable by anything on the
+path. Put a reverse proxy (nginx, Caddy) in front of the sync port, terminate
+TLS there, and proxy to the daemon over loopback.
+
+Players and co-admins then use the proxy's `https://` URL as the **host
+address** in the desktop app's connection form — the same field that otherwise
+takes a hostname or IP. When the address is a URL, the sync port field is
+ignored: the URL carries its own port, explicitly
+(`https://mw.example.org:8443`) or by its scheme. A path prefix works too
+(`https://example.org/nerevar`), so the host can be mounted under a subpath of a
+site that serves other things.
+
+The proxy has three jobs beyond TLS:
+
+- **Pass `Authorization` and `X-Nerevar-Sync-Password` through unchanged.** Both
+  are how the daemon knows who is calling; a proxy that strips or rewrites them
+  turns every request into a `401`.
+- **Allow large request bodies** on `PUT /admin/packages/*`, which uploads a mod
+  package. nginx defaults to 1 MB (`client_max_body_size`); Caddy's default is
+  unlimited but `request_body max_size` caps it if you set one.
+- **Allow long read timeouts.** A player's first sync streams every file in the
+  manifest, which can run for many minutes on a large mod list.
+
+nginx:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name mw.example.org;
+
+    ssl_certificate     /etc/letsencrypt/live/mw.example.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/mw.example.org/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:25567;
+        proxy_set_header Host $host;
+
+        client_max_body_size 0;      # mod package uploads are large
+        proxy_read_timeout 3600s;    # first sync streams for a long time
+        proxy_request_buffering off;
+    }
+}
+```
+
+Caddy:
+
+```caddy
+mw.example.org {
+    reverse_proxy 127.0.0.1:25567 {
+        transport http {
+            read_timeout 3600s
+        }
+    }
+}
+```
+
+Caddy needs no body-size directive unless you add one; if you do, give
+`request_body max_size` room for your largest package.
+
+Only the *sync* traffic goes through the proxy. TES3MP itself is UDP straight to
+the game port, so that port stays open on the host and the game connection is
+made to the proxy's hostname, not its URL — Nerevar derives that for you when
+you enter a URL address.
+
+Native TLS in the daemon is planned, not present; until then the proxy is the
+only supported way to serve Nerevar over HTTPS.
 
 ## Run it under systemd
 

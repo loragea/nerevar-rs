@@ -358,6 +358,64 @@ async fn host_client_sync_roundtrip() {
         "Downloading at 100% of bytes maps to overallPercent 85"
     );
 
+    // ---- CLIENT: the host address given as a full URL --------------------------------
+    // A host behind an HTTPS reverse proxy is configured as a URL instead of a bare
+    // hostname, and the sync port then plays no part in the address. Same in-process
+    // server, reached through `http://127.0.0.1:{port}` with a deliberately wrong
+    // `syncPort`: everything must still resolve, fetch, and download.
+    let url_host = format!("http://127.0.0.1:{port}");
+    let bogus_sync_port = 1u16;
+
+    let url_summary = fetch_manifest_summary(&url_host, bogus_sync_port, Some(SYNC_PASSWORD))
+        .await
+        .expect("URL host must reach the server with the sync port ignored");
+    assert_eq!(url_summary.package_count, 2);
+    assert_eq!(url_summary.total_download_bytes, expected_total_bytes);
+
+    let url_manifest = fetch_full_manifest(&url_host, bogus_sync_port, Some(SYNC_PASSWORD))
+        .await
+        .expect("URL host must serve the full manifest");
+    assert_eq!(url_manifest.packages.len(), fetched.packages.len());
+
+    let url_dir = root.join("client-url");
+    std::fs::create_dir_all(&url_dir).unwrap();
+    let url_sink = Arc::new(CollectingEventSink::default());
+    let url_outcome = download_manifest_files(
+        url_sink,
+        "roundtrip-instance",
+        &url_host,
+        bogus_sync_port,
+        Some(SYNC_PASSWORD),
+        &url_dir,
+        &url_manifest,
+        false,
+        Arc::new(AtomicBool::new(false)),
+    )
+    .await
+    .expect("URL host must drive the download engine");
+    match url_outcome {
+        DownloadOutcome::Complete { bytes_done } => assert_eq!(
+            bytes_done, expected_total_bytes,
+            "URL-host download should report every byte"
+        ),
+        DownloadOutcome::Cancelled { .. } => panic!("URL-host download must not be cancelled"),
+    }
+    for pkg in &url_manifest.packages {
+        for file in &pkg.files {
+            let dest = package_abs_path(&url_dir, &pkg.relative_dir).join(&file.path);
+            let got = file_checksum(&dest).expect("URL-host checksum");
+            assert_eq!(got, file.checksum, "URL-host checksum mismatch for {}", file.path);
+        }
+    }
+
+    // An address the resolver rejects fails before any request is made.
+    assert!(
+        fetch_manifest_summary("ftp://127.0.0.1", port, Some(SYNC_PASSWORD))
+            .await
+            .is_err(),
+        "an unsupported scheme must be rejected"
+    );
+
     // ---- CLIENT: negatives ----------------------------------------------------------
     // Path traversal: fully percent-encoded so the URL layer does not collapse `..`
     // before it reaches the handler. Must NOT return file content.

@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { SyncProgressPanel } from "@/features/instances/components/sync-progress-panel";
 import { useInstanceSync } from "@/features/instances/hooks/use-instance-sync";
+import { HOST_ADDRESS_HELP } from "@/features/instances/schemas/host-address-schema";
 import {
   newConnectionDefaultValues,
   newConnectionSchema,
@@ -323,6 +324,9 @@ export function NewConnectionPage() {
                   disabled={busy}
                   {...form.register("remoteHost")}
                 />
+                <p className="font-serif text-sm text-foreground/60">
+                  {HOST_ADDRESS_HELP}
+                </p>
                 {form.formState.errors.remoteHost ? (
                   <FieldError errors={[form.formState.errors.remoteHost]} />
                 ) : null}

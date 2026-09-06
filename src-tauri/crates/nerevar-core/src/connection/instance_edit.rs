@@ -11,6 +11,7 @@ use crate::instance_setup::{
 };
 use crate::reporter::{emit_event, EventSink};
 use crate::runtime::{normalize_runtime_hint, RuntimeSource};
+use crate::sync_client::game_host;
 use crate::sync_host::{set_hosting_runtime_hint, SharedSyncHost};
 use crate::AppState;
 
@@ -90,7 +91,13 @@ pub fn update_instance(
     instance.description = edit.description;
 
     if is_synced {
-        instance.remote_host = Some(edit.host.trim().to_string());
+        // `game_host` resolves the address through `base_url`, so one the sync
+        // client could not build a base URL from is rejected here at save time
+        // rather than at the next sync.
+        let host = edit.host.trim();
+        let game_address = game_host(host)?;
+
+        instance.remote_host = Some(host.to_string());
         instance.remote_sync_port = Some(edit.port);
         instance.sync_password = Some(edit.password.clone());
 
@@ -100,12 +107,7 @@ pub fn update_instance(
                 .map(|client| client.port)
         });
         if let Some(game_port) = game_port {
-            write_tes3mp_client_connection(
-                &tes3mp_dir,
-                edit.host.trim(),
-                game_port,
-                &edit.password,
-            )?;
+            write_tes3mp_client_connection(&tes3mp_dir, &game_address, game_port, &edit.password)?;
             instance.tes3mp_server_port = Some(game_port);
         }
         let config = update_synced_instance(state, instance)?;
