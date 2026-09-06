@@ -30,6 +30,24 @@ pub fn launch_cfg_path(data_dir: &Path) -> PathBuf {
     launch_cfg_dir(data_dir).join(LAUNCH_CFG_FILE)
 }
 
+/// Path-safety check for a package directory name (a `load-order.json`
+/// `relativeDir`, or the name an admin uploads under).
+///
+/// A package name is one path segment and nothing else: never empty, never a
+/// traversal, never carrying a separator or a drive letter. Both the delete
+/// path and the co-admin upload route go through this before they touch the
+/// filesystem; callers with stricter needs (uploads reject reserved and
+/// dot-leading names, and cap the length) layer their rules on top.
+pub fn validate_package_dir_name(name: &str) -> Result<(), String> {
+    if name.trim().is_empty() {
+        return Err("Package path is empty".into());
+    }
+    if name.contains("..") || name.contains('/') || name.contains('\\') || name.contains(':') {
+        return Err(format!("Invalid package path: {name}"));
+    }
+    Ok(())
+}
+
 pub fn package_abs_path(data_dir: &Path, relative_dir: &str) -> PathBuf {
     data_dir.join(relative_dir)
 }

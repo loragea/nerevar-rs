@@ -13,6 +13,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::admin::staging::{data_package_names, load_pending, StagedPackage};
 use crate::instance_data::{load_load_order, load_manifest};
 
 /// Counts from `load-order.json`.
@@ -55,10 +56,31 @@ pub struct AdminStatus {
     /// embedder supervises no process (the desktop app's server, or a daemon
     /// built without a process manager wired into the HTTP context).
     pub tes3mp_server_running: Option<bool>,
-    /// Staged, not-yet-applied changes. There is no staging area yet, so this
-    /// is always `null`; `PUT /admin/packages/*` gives it a shape.
-    #[ts(type = "null")]
-    pub pending_changes: Option<serde_json::Value>,
+    /// Staged, not-yet-applied changes, or `null` when nothing is pending.
+    /// `null` and an object with empty lists would mean the same thing, so
+    /// only one of them is ever sent: nothing pending is `null`.
+    pub pending_changes: Option<AdminPendingChanges>,
+    /// Whether a running TES3MP dedicated server is enforcing a plugin list
+    /// older than the manifest now being served. Set by `POST /admin/apply`,
+    /// because apply deliberately does not restart the game server; cleared
+    /// by a restart. `false` on a host that has not applied anything this
+    /// run, which is also what a host with no game server reports.
+    pub tes3mp_plugin_list_stale: bool,
+}
+
+/// The staging area as `GET /admin/status` reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct AdminPendingChanges {
+    /// Uploaded packages waiting for apply, by name.
+    pub staged: Vec<StagedPackage>,
+    /// Packages in `data/` marked for deletion at apply.
+    pub removals: Vec<String>,
+    /// Whether a `POST /admin/load-order` is waiting to be written. The order
+    /// itself is not inlined here — it is as long as the mod list, and
+    /// `GET /admin/load-order` serves it.
+    pub has_load_order: bool,
 }
 
 /// Assembles the status from what is on disk under `data_dir` plus the two
@@ -71,6 +93,7 @@ pub fn build_admin_status(
     instance_id: Option<String>,
     data_dir: Option<&Path>,
     tes3mp_server_running: Option<bool>,
+    tes3mp_plugin_list_stale: bool,
 ) -> AdminStatus {
     let hosting = instance_id.is_some() && data_dir.is_some();
 
@@ -101,8 +124,41 @@ pub fn build_admin_status(
         load_order,
         manifest,
         tes3mp_server_running,
-        pending_changes: None,
+        pending_changes: data_dir.and_then(pending_changes_for),
+        tes3mp_plugin_list_stale,
     }
+}
+
+/// The pending set for `data_dir`, or `None` when nothing is staged.
+///
+/// `replacesExisting` is recomputed against `data/` rather than read from the
+/// record: a package can appear or vanish between the upload and the status
+/// call, and an admin deciding whether to apply needs the answer as it stands
+/// now. An unreadable staging area reports as nothing pending — status is a
+/// read-only view and must not fail the whole response over it.
+pub fn pending_changes_for(data_dir: &Path) -> Option<AdminPendingChanges> {
+    let pending = load_pending(data_dir).ok()?;
+    if pending.is_empty() {
+        return None;
+    }
+
+    let existing = data_package_names(data_dir).unwrap_or_default();
+    let staged = pending
+        .staged
+        .into_iter()
+        .map(|mut package| {
+            package.replaces_existing = existing
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(&package.name));
+            package
+        })
+        .collect();
+
+    Some(AdminPendingChanges {
+        staged,
+        removals: pending.removals,
+        has_load_order: pending.load_order.is_some(),
+    })
 }
 
 fn manifest_age_seconds(generated_at: &str) -> Option<i64> {
@@ -119,7 +175,7 @@ mod tests {
 
     #[test]
     fn a_host_with_nothing_on_disk_reports_nulls_rather_than_zeroes() {
-        let status = build_admin_status(None, None, None);
+        let status = build_admin_status(None, None, None, false);
         assert!(!status.hosting);
         assert!(status.instance_id.is_none());
         assert!(status.instance_name.is_none());
@@ -127,17 +183,61 @@ mod tests {
         assert!(status.manifest.is_none());
         assert!(status.tes3mp_server_running.is_none());
         assert!(status.pending_changes.is_none());
+        assert!(!status.tes3mp_plugin_list_stale);
     }
 
     #[test]
-    fn pending_changes_serializes_as_a_present_null() {
-        let value = serde_json::to_value(build_admin_status(None, None, Some(false))).unwrap();
+    fn nothing_pending_serializes_as_a_present_null() {
+        let value =
+            serde_json::to_value(build_admin_status(None, None, Some(false), true)).unwrap();
         assert_eq!(value["pendingChanges"], serde_json::Value::Null);
         assert!(
             value.as_object().unwrap().contains_key("pendingChanges"),
-            "the placeholder must be present, not omitted"
+            "the field must be present, not omitted"
         );
         assert_eq!(value["tes3mpServerRunning"], serde_json::json!(false));
+        assert_eq!(value["tes3mpPluginListStale"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn a_staged_package_shows_up_in_the_pending_set() {
+        use crate::admin::staging::{now_rfc3339, save_pending, PendingChanges, StagedPackage};
+        use crate::instance_data::PackageKind;
+
+        let data_dir = std::env::temp_dir().join(format!(
+            "nerevar-admin-status-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(data_dir.join("Better Bodies")).unwrap();
+
+        let mut pending = PendingChanges::default();
+        pending.upsert_staged(StagedPackage {
+            name: "Better Bodies".to_string(),
+            kind: PackageKind::Mod,
+            plugins: vec!["bb.esp".to_string()],
+            // Stale on the record; status recomputes it against `data/`.
+            replaces_existing: false,
+            archive_bytes: 10,
+            extracted_bytes: 5,
+            staged_at: now_rfc3339(),
+            staged_by: "ada".to_string(),
+        });
+        pending.mark_removal("Old Mod");
+        save_pending(&data_dir, &pending).unwrap();
+
+        let status =
+            build_admin_status(Some("inst".to_string()), Some(&data_dir), Some(true), false);
+        let changes = status.pending_changes.expect("a pending set");
+        assert_eq!(changes.staged.len(), 1);
+        assert!(
+            changes.staged[0].replaces_existing,
+            "data/Better Bodies exists, so this upload replaces it"
+        );
+        assert_eq!(changes.removals, vec!["Old Mod".to_string()]);
+        assert!(!changes.has_load_order);
+
+        let _ = std::fs::remove_dir_all(&data_dir);
     }
 
     #[test]

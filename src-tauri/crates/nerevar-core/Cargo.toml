@@ -17,6 +17,11 @@ log = "0.4"
 reqwest = { version = "0.13.3", features = ["json", "stream"] }
 tokio = { version = "1.52.3", features = ["full"] }
 tokio-util = { version = "0.7", features = ["io"] }
+# `StreamExt` for the one place core consumes a stream it did not create: the
+# admin upload route reads an axum request body chunk by chunk so a multi-GiB
+# archive never lands in memory. Already in the lock file under axum and
+# reqwest; named here so this crate may use it directly.
+futures-util = "0.3"
 zip = "8.6.0"
 flate2 = "1.1.9"
 tar = "0.4.46"

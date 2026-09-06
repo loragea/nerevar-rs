@@ -13,7 +13,9 @@ mod resolver;
 mod scan;
 mod types;
 
-pub use load_order::{load_load_order, save_load_order, scan_and_merge_load_order};
+pub use load_order::{
+    load_load_order, merge_scanned_with_data_dir, save_load_order, scan_and_merge_load_order,
+};
 pub use lookup::find_instance_by_id;
 pub use mo2_modlist::{import_mo2_modlist_from_csv, Mo2ModlistImportReport, Mo2ModlistImportResult};
 pub use manifest::{
@@ -29,7 +31,9 @@ pub use progress::{
 pub use paths::{
     ensure_instance_data_layout, launch_cfg_dir, launch_cfg_path, launch_settings_overlay_path,
     load_order_path, manifest_path, nerevar_dir, package_abs_path, resolve_package_data_dir,
+    validate_package_dir_name,
 };
+pub use scan::{scan_data_directory, scan_package_dir, should_skip_package_dir};
 pub use prune::prune_local_against_manifest;
 // Test-only: expose the manifest's file-checksum helper to `sync_roundtrip_test`, which
 // still lives in the app crate (moves to core's own `tests/` in step 8). `cfg(test)` alone

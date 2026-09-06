@@ -8,9 +8,10 @@ use nerevar_core::reporter::EventSink;
 /// else (progress spam — sync/scan progress events not relevant headless)
 /// is downgraded to `debug`.
 ///
-/// `admin-request` is in the `info` set on purpose: it is the co-admin audit
-/// trail (who did what, and what they got back), and it is only useful if it
-/// reaches journald by default.
+/// `admin-request` and `admin-apply` are in the `info` set on purpose: they
+/// are the co-admin audit trail (who did what, what they got back, and what
+/// an apply changed), and they are only useful if they reach journald by
+/// default.
 pub struct LogEventSink;
 
 impl EventSink for LogEventSink {
@@ -23,7 +24,8 @@ impl EventSink for LogEventSink {
             "process-status"
             | "hosting-changed"
             | "port-conflicts-detected"
-            | nerevar_core::admin::ADMIN_REQUEST_EVENT => {
+            | nerevar_core::admin::ADMIN_REQUEST_EVENT
+            | nerevar_core::admin::ADMIN_APPLY_EVENT => {
                 log::info!(target: "event", "{event} {payload}");
             }
             _ => {

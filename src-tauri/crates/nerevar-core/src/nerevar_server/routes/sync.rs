@@ -19,31 +19,65 @@ use crate::sync_auth::{sync_password_matches, SYNC_PASSWORD_HEADER};
 use crate::sync_host::get_package_file_path;
 use crate::sync_paths::normalize_manifest_file_path;
 
+/// What `GET /` serves, and what `POST /admin/apply` answers with so an admin
+/// sees exactly the summary a client would fetch next.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ManifestSummary {
-    instance_id: String,
-    instance_name: String,
-    total_download_bytes: u64,
-    package_count: u32,
-    tes3mp_server_port: u16,
-    password_required: bool,
-    packages: Vec<ManifestPackageSummary>,
+pub(super) struct ManifestSummary {
+    pub instance_id: String,
+    pub instance_name: String,
+    pub total_download_bytes: u64,
+    pub package_count: u32,
+    pub tes3mp_server_port: u16,
+    pub password_required: bool,
+    pub packages: Vec<ManifestPackageSummary>,
     /// The runtime the operator advertises, when there is one. Omitted
     /// entirely otherwise, which is also what a host older than the field
     /// sends — a client reads both as "no suggestion".
     #[serde(skip_serializing_if = "Option::is_none")]
-    runtime_hint: Option<RuntimeSource>,
+    pub runtime_hint: Option<RuntimeSource>,
+}
+
+impl ManifestSummary {
+    /// The summary for `manifest`, given the two facts that live outside it.
+    pub(super) fn of(
+        manifest: &crate::instance_data::NerevarManifest,
+        password_required: bool,
+        runtime_hint: Option<RuntimeSource>,
+    ) -> Self {
+        let packages: Vec<ManifestPackageSummary> = manifest
+            .packages
+            .iter()
+            .map(|p| ManifestPackageSummary {
+                id: p.id.clone(),
+                name: p.name.clone(),
+                relative_dir: p.relative_dir.clone(),
+                total_size_bytes: p.total_size_bytes,
+                file_count: p.file_count,
+            })
+            .collect();
+
+        Self {
+            instance_id: manifest.instance_id.clone(),
+            instance_name: manifest.instance_name.clone(),
+            total_download_bytes: manifest.total_download_bytes,
+            package_count: packages.len() as u32,
+            tes3mp_server_port: manifest.tes3mp_server_port,
+            password_required,
+            packages,
+            runtime_hint,
+        }
+    }
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ManifestPackageSummary {
-    id: String,
-    name: String,
-    relative_dir: String,
-    total_size_bytes: u64,
-    file_count: u32,
+pub(super) struct ManifestPackageSummary {
+    pub id: String,
+    pub name: String,
+    pub relative_dir: String,
+    pub total_size_bytes: u64,
+    pub file_count: u32,
 }
 
 pub fn router() -> Router<Arc<ServerContext>> {
@@ -121,7 +155,7 @@ fn verify_sync_password(
     }
 }
 
-fn password_required(state: &ServerContext) -> Result<bool, (StatusCode, String)> {
+pub(super) fn password_required(state: &ServerContext) -> Result<bool, (StatusCode, String)> {
     let expected = {
         let host = state
             .sync_host
@@ -155,7 +189,7 @@ fn password_required(state: &ServerContext) -> Result<bool, (StatusCode, String)
 /// The runtime hint the hosted instance advertises, snapshotted into the
 /// hosting state when hosting started (the request path has no config to
 /// read).
-fn hosting_runtime_hint(
+pub(super) fn hosting_runtime_hint(
     state: &ServerContext,
 ) -> Result<Option<RuntimeSource>, (StatusCode, String)> {
     let host = state.sync_host.lock().map_err(|_| {
@@ -177,28 +211,11 @@ async fn root_manifest_summary(
     let password_required = password_required(&state)?;
     let runtime_hint = hosting_runtime_hint(&state)?;
 
-    let packages: Vec<ManifestPackageSummary> = manifest
-        .packages
-        .iter()
-        .map(|p| ManifestPackageSummary {
-            id: p.id.clone(),
-            name: p.name.clone(),
-            relative_dir: p.relative_dir.clone(),
-            total_size_bytes: p.total_size_bytes,
-            file_count: p.file_count,
-        })
-        .collect();
-
-    Ok(Json(ManifestSummary {
-        instance_id: manifest.instance_id,
-        instance_name: manifest.instance_name,
-        total_download_bytes: manifest.total_download_bytes,
-        package_count: packages.len() as u32,
-        tes3mp_server_port: manifest.tes3mp_server_port,
+    Ok(Json(ManifestSummary::of(
+        &manifest,
         password_required,
-        packages,
         runtime_hint,
-    }))
+    )))
 }
 
 async fn get_full_manifest(

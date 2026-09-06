@@ -298,12 +298,81 @@ curl -H "Authorization: Bearer $(cat ada.token)" http://myhost:25567/admin/statu
 ```
 
 `GET /admin/status` reports whether hosting is active, the instance, load-order
-counts, when the manifest was generated and how old it is, and — when the
-daemon supervises the game server — whether TES3MP is running. A missing or
+counts, when the manifest was generated and how old it is, the pending change
+set (`pendingChanges`: staged packages, packages marked for removal, whether a
+load order is waiting — `null` when nothing is staged), whether a running
+TES3MP server is behind the served manifest (`tes3mpPluginListStale`), and —
+when the daemon supervises the game server — whether TES3MP is running. A missing or
 unrecognised token is `401`; a valid token whose role does not grant the route's
 capability is `403`. Both come back as `{"error": "..."}`. Every authenticated
 request is logged with the admin's name, the method, the path, and the response
 status, at `info`, so `journalctl -u nerevar-host` is the audit trail.
+
+### Changing the mod list over HTTP
+
+Co-admin writes are **staged, then applied**. Everything a co-admin uploads or
+marks lands in `<data dir>/.nerevar/staging/` — never in `data/` — and one
+`POST /admin/apply` turns the whole set into a new `data/`, a new
+`load-order.json` and a new `manifest.json`. So a co-admin can stage over
+several days, another admin can review `GET /admin/status` first, and one
+approval publishes the lot. `POST /admin/discard` throws the pending set away.
+
+Assume `H="http://myhost:25567"` and `A="Authorization: Bearer $(cat ada.token)"`.
+
+**Upload a package.** The body is the archive itself — `.zip` or `.tar.gz`,
+detected from its content — and the URL's last segment is the directory name
+the package will take in `data/`:
+
+```
+curl -X PUT -H "$A" --upload-file "Better Bodies.zip" "$H/admin/packages/Better%20Bodies"
+```
+
+The reply says what landed: `name`, `kind` (`mod` or `replacer`), the `plugins`
+found, `archiveBytes`, `extractedBytes`, and `replacesExisting`. If the archive
+holds **exactly one entry and it is a directory**, that wrapper is stripped and
+its contents become the package; anything else is taken as-is, and only one
+level is ever removed. A name that already exists in `data/` means *replace at
+apply*, which `status` reports. A name is one plain path segment: no `/`, no
+`..`, no `.`-leading or reserved names (`data`, `tes3mp`, `.nerevar`), at most
+128 characters. The body limit on this route only is **4 GiB**; if you front the
+daemon with a reverse proxy, raise its limit for `PUT /admin/packages/*` too.
+
+**Set the load order.** The body is exactly the `load-order.json` document the
+desktop app writes, so the rules are that file's rules; on top of them an entry
+may name a staged package, and may not name a package that will exist nowhere
+after apply. Fetch, edit, post back:
+
+```
+curl -H "$A" "$H/admin/load-order" > order.json     # {"current": ..., "pending": ...}
+jq .current order.json | ... > proposed.json
+curl -X POST -H "$A" -H 'Content-Type: application/json' \
+     --data @proposed.json "$H/admin/load-order"
+```
+
+**Remove a package.** A staged upload is dropped outright; a package in `data/`
+is *marked*, and apply is what deletes it. `404` if it is neither.
+
+```
+curl -X DELETE -H "$A" "$H/admin/packages/Old%20Mod"
+```
+
+**Apply, or throw it away.**
+
+```
+curl -X POST -H "$A" "$H/admin/apply"      # returns the new manifest summary
+curl -X POST -H "$A" "$H/admin/discard"    # clears staging and the pending set
+```
+
+Apply is serialized: a second one while the first is running is a `409`.
+Applying with nothing pending is a `200` that still rebuilds — that is how you
+regenerate a manifest after changing files on the host by hand. Players pick
+the new manifest up on their next sync.
+
+**Apply does not restart TES3MP.** The dedicated server reads its plugin list
+once, at start, so after an apply the running game server is still enforcing
+the old one. The daemon logs a warning and `status` reports
+`tes3mpPluginListStale: true`; restart the service (`systemctl restart
+nerevar-host`) when the players are ready.
 
 ### Roles
 
@@ -321,7 +390,9 @@ The daemon speaks plain **HTTP** and has no TLS of its own. On a LAN or a VPN
 that is fine. Over the internet, put a reverse proxy (nginx, Caddy) in front of
 the sync port and terminate TLS there — a bearer token in a plaintext header is
 readable by anything on the path. Pass the `Authorization` and
-`X-Nerevar-Sync-Password` headers through unchanged.
+`X-Nerevar-Sync-Password` headers through unchanged, and raise the proxy's
+request-body limit on `PUT /admin/packages/*` (nginx's default is 1 MiB, which
+would reject every real mod archive).
 
 ## Run it under systemd
 
@@ -365,6 +436,10 @@ sudo systemctl restart nerevar-host
 The restart rebuilds the manifest, so connected clients pick the changes up on
 their next sync. There is no hot reload — a restart is the way to apply
 anything, including config changes.
+
+A co-admin with no shell does the same thing over HTTP instead — upload,
+`apply`, then restart when convenient. See
+[Changing the mod list over HTTP](#changing-the-mod-list-over-http).
 
 **Remove a mod.** Delete the directory and rescan; `--scan` drops entries whose
 directory is gone. Clients prune the files on their next sync.

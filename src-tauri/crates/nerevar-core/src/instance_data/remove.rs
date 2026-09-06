@@ -2,7 +2,7 @@ use std::path::Path;
 
 use super::load_order::{load_load_order, save_load_order};
 use super::manifest::build_manifest;
-use super::paths::{manifest_path, package_abs_path};
+use super::paths::{manifest_path, package_abs_path, validate_package_dir_name};
 use super::scan::should_skip_package_dir;
 use super::types::LoadOrder;
 
@@ -60,17 +60,7 @@ pub fn delete_package(
 }
 
 fn validate_relative_dir(relative_dir: &str) -> Result<(), String> {
-    if relative_dir.trim().is_empty() {
-        return Err("Package path is empty".into());
-    }
-    if relative_dir.contains("..")
-        || relative_dir.contains('/')
-        || relative_dir.contains('\\')
-        || relative_dir.contains(':')
-    {
-        return Err(format!("Invalid package path: {relative_dir}"));
-    }
-    Ok(())
+    validate_package_dir_name(relative_dir)
 }
 
 fn ensure_path_within_data_dir(data_dir: &Path, package_path: &Path) -> Result<(), String> {
