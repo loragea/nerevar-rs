@@ -1,4 +1,4 @@
-mod checksum;
+pub(crate) mod checksum;
 mod load_order;
 mod lookup;
 mod manifest;

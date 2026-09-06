@@ -38,7 +38,11 @@ pub fn sync_password_matches(expected: &str, provided: Option<&str>) -> bool {
 /// Deliberately dependency-free (core takes no new crates for this): the
 /// unequal-length case is handled by XOR-ing the lengths into the accumulator
 /// and reading missing bytes as zero, so `"ab"` and `"ab\0"` still differ.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+///
+/// Crate-visible so the co-admin store (`admin::store`) compares token
+/// digests through this exact helper rather than growing a second one; the
+/// sync-password path above is unchanged.
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     let mut diff: usize = a.len() ^ b.len();
     for index in 0..a.len().max(b.len()) {
         let left = a.get(index).copied().unwrap_or(0);

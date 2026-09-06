@@ -7,6 +7,10 @@ use nerevar_core::reporter::EventSink;
 /// named lifecycle events go to the `event` target at `info`; everything
 /// else (progress spam — sync/scan progress events not relevant headless)
 /// is downgraded to `debug`.
+///
+/// `admin-request` is in the `info` set on purpose: it is the co-admin audit
+/// trail (who did what, and what they got back), and it is only useful if it
+/// reaches journald by default.
 pub struct LogEventSink;
 
 impl EventSink for LogEventSink {
@@ -16,7 +20,10 @@ impl EventSink for LogEventSink {
                 let line = payload.get("line").and_then(|v| v.as_str()).unwrap_or("");
                 log::info!(target: "tes3mp", "{line}");
             }
-            "process-status" | "hosting-changed" | "port-conflicts-detected" => {
+            "process-status"
+            | "hosting-changed"
+            | "port-conflicts-detected"
+            | nerevar_core::admin::ADMIN_REQUEST_EVENT => {
                 log::info!(target: "event", "{event} {payload}");
             }
             _ => {

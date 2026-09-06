@@ -15,6 +15,7 @@
 /// describes the code sending the request.
 pub const USER_AGENT: &str = concat!("Nerevar-", env!("CARGO_PKG_VERSION"));
 
+pub mod admin;
 pub mod app_state;
 pub mod config;
 pub mod connection;

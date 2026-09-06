@@ -2995,6 +2995,7 @@ dependencies = [
  "dirs",
  "encoding_rs",
  "flate2",
+ "getrandom 0.4.2",
  "log",
  "nerevar-core",
  "netstat2",

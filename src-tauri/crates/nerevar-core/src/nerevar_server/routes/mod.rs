@@ -1,3 +1,4 @@
+mod admin;
 mod health;
 mod sync;
 
@@ -11,5 +12,6 @@ use crate::nerevar_server::state::ServerContext;
 pub fn router(ctx: Arc<ServerContext>) -> Router {
     Router::new()
         .merge(health::router())
+        .merge(admin::router(ctx.clone()))
         .merge(sync::router().with_state(ctx))
 }

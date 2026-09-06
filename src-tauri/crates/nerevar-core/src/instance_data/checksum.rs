@@ -156,7 +156,7 @@ fn collect_files(
     Ok(())
 }
 
-fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
+pub(crate) fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
     bytes
         .as_ref()
         .iter()
