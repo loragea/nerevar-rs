@@ -5,7 +5,8 @@ use crate::data::{InstanceConfig, NerevarConfig, NewConnectionConfig, NewInstanc
 use crate::port_conflict;
 use crate::instance_data::ensure_instance_data_layout;
 use crate::instance_setup::{
-    apply_server_defaults, create_instance_data_dir, instance_tes3mp_dir, InstancePaths,
+    apply_server_defaults, create_instance_data_dir, instance_tes3mp_dir, unique_instance_name,
+    InstancePaths,
 };
 use crate::reporter::{emit_event, EventSink};
 use crate::runtime::{self, RuntimeSource, TargetPlatform};
@@ -41,6 +42,40 @@ pub fn nerevar_config_file_path_opt(identifier: &str) -> Option<PathBuf> {
     Some(dirs::data_dir()?.join(identifier).join(CONFIG_FILE_NAME))
 }
 
+/// The directory the player's Nerevar data lands in when nobody chooses one:
+/// `<user data dir>/Nerevar/instances`.
+///
+/// The joining path in onboarding defaults to it instead of opening a picker
+/// (`notes` ruling: a player should not have to answer where a program keeps
+/// its files), and an "advanced" disclosure still offers the picker.
+pub const DEFAULT_DATA_DIR_NAME: &str = "Nerevar";
+/// The `instances` directory under [`DEFAULT_DATA_DIR_NAME`].
+pub const DEFAULT_INSTANCES_DIR_NAME: &str = "instances";
+
+/// The default Nerevar data directory under a given user data directory.
+/// Pure, so a test can pin the layout without a real home directory.
+pub fn default_instances_dir_under(user_data_dir: &Path) -> PathBuf {
+    user_data_dir
+        .join(DEFAULT_DATA_DIR_NAME)
+        .join(DEFAULT_INSTANCES_DIR_NAME)
+}
+
+/// [`default_instances_dir_under`] applied to this user's data directory.
+pub fn default_instances_dir() -> Result<PathBuf, String> {
+    let user_data_dir = dirs::data_dir()
+        .ok_or_else(|| "Failed to resolve the user data directory".to_string())?;
+    Ok(default_instances_dir_under(&user_data_dir))
+}
+
+/// The default data directory, created if it is not there yet, as a string for
+/// the frontend to show and hand back on submit.
+pub fn ensure_default_instances_dir() -> Result<String, String> {
+    let dir = default_instances_dir()?;
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Failed to create {}: {e}", dir.display()))?;
+    Ok(dir.display().to_string())
+}
+
 pub fn load_or_create_nerevar_config_at(config_path: &Path) -> Result<NerevarConfig, String> {
     if !config_path.exists() {
         info!("Creating default config file at {}", config_path.display());
@@ -53,6 +88,7 @@ pub fn load_or_create_nerevar_config_at(config_path: &Path) -> Result<NerevarCon
             synced_instances: None,
             root_path: None,
             sync_port: 25567,
+            morrowind_data_files: None,
         };
         std::fs::write(
             config_path,
@@ -192,6 +228,31 @@ pub async fn set_root_path(state: &Mutex<AppState>, path: String) -> Result<(), 
     Ok(())
 }
 
+/// Generates the global OpenMW scaffold from a Morrowind `Data Files`
+/// directory and records the directory in `config.json`.
+///
+/// Both halves of what onboarding's Morrowind step means, in the order that
+/// keeps the config honest: the scaffold is written first, so a path that
+/// turns out not to be a Morrowind installation errors before anything is
+/// stored. Both onboarding paths — hosting and joining — go through here.
+pub async fn set_morrowind_data_files(
+    state: &Mutex<AppState>,
+    morrowind_data_files: String,
+) -> Result<(), String> {
+    crate::openmw_ini_importer::setup_nerevar_openmw_scaffold(Path::new(&morrowind_data_files))?;
+
+    let mut state = state
+        .lock()
+        .map_err(|_| "App state lock poisoned".to_string())?;
+    state.nerevar_config.morrowind_data_files = Some(morrowind_data_files);
+    std::fs::write(
+        Path::new(&state.nerevar_config_path),
+        serde_json::to_string_pretty(&state.nerevar_config).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub async fn set_sync_port(state: &Mutex<AppState>, port: i32) -> Result<(), String> {
     if !(1..=65535).contains(&port) {
         return Err(format!("Sync port must be between 1 and 65535, got {port}"));
@@ -274,6 +335,24 @@ pub fn build_synced_instance_config(
         tes3mp_server_port: None,
         sync_password: Some(new_connection.sync_password.clone()),
     }
+}
+
+/// The name to create a synced instance under when the host's own instance
+/// name is the starting point: free as it stands, or numbered.
+///
+/// Owned instances count as taken too, not just synced ones: every instance
+/// lives under the same Nerevar data directory, so a name shared with an owned
+/// instance collides on exactly the same folder.
+pub fn unique_synced_instance_name(config: &NerevarConfig, desired: &str) -> String {
+    let taken: Vec<String> = config
+        .owned_instances
+        .iter()
+        .chain(config.synced_instances.iter())
+        .flat_map(|list| list.iter())
+        .map(|instance| instance.name.clone())
+        .collect();
+
+    unique_instance_name(desired, &taken)
 }
 
 fn persist_owned_instance_to_config(
@@ -722,5 +801,92 @@ mod tests {
         let json = serde_json::to_value(&instance).unwrap();
         assert_eq!(json["releaseId"], "65767406");
         assert_eq!(json["runtime"]["kind"], "githubRelease");
+    }
+
+    /// The default player data directory: layout pinned against a base a test
+    /// controls, since the real one depends on the machine's home directory.
+    #[test]
+    fn the_default_data_directory_is_nerevar_instances_under_the_user_data_dir() {
+        assert_eq!(
+            default_instances_dir_under(Path::new("/home/player/.local/share")),
+            Path::new("/home/player/.local/share")
+                .join("Nerevar")
+                .join("instances")
+        );
+    }
+
+    /// `morrowindDataFiles` survives a save and a load, and an older config
+    /// that never had it still parses.
+    #[test]
+    fn the_morrowind_data_files_path_round_trips_and_is_optional() {
+        let scratch = scratch("morrowind-path");
+        let path = scratch.0.join("config.json");
+
+        let mut config = NerevarConfig {
+            onboarding_complete: true,
+            owned_instances: None,
+            synced_instances: None,
+            root_path: Some("/instances".to_string()),
+            sync_port: 25567,
+            morrowind_data_files: Some("/games/Morrowind/Data Files".to_string()),
+        };
+        std::fs::write(&path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
+
+        let loaded = load_nerevar_config_at(&path).expect("config should load");
+        assert_eq!(
+            loaded.morrowind_data_files.as_deref(),
+            Some("/games/Morrowind/Data Files")
+        );
+
+        // Unset, the key is not written at all, so a build older than the
+        // field reads a config this one wrote unchanged.
+        config.morrowind_data_files = None;
+        let json = serde_json::to_string_pretty(&config).unwrap();
+        assert!(!json.contains("morrowindDataFiles"), "{json}");
+
+        // And a config from such a build loads with the field absent.
+        let legacy = load_nerevar_config_at(&{
+            let legacy_path = scratch.0.join("legacy.json");
+            std::fs::write(&legacy_path, LEGACY_CONFIG).unwrap();
+            legacy_path
+        })
+        .expect("legacy config should load");
+        assert!(legacy.morrowind_data_files.is_none());
+    }
+
+    /// The join path names an instance after the host's; two hosts using the
+    /// same name must still land in two folders.
+    #[test]
+    fn a_synced_instance_name_is_deduplicated_against_every_instance() {
+        let instance = |name: &str| InstanceConfig {
+            id: name.to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            path: String::new(),
+            data_dir: String::new(),
+            release_id: None,
+            runtime: None,
+            runtime_hint: None,
+            remote_host: None,
+            remote_sync_port: None,
+            last_synced_at: None,
+            tes3mp_server_port: None,
+            sync_password: None,
+        };
+
+        let config = NerevarConfig {
+            onboarding_complete: true,
+            owned_instances: Some(vec![instance("Vvardenfell")]),
+            synced_instances: Some(vec![instance("Vvardenfell (2)")]),
+            root_path: None,
+            sync_port: 25567,
+            morrowind_data_files: None,
+        };
+
+        assert_eq!(
+            unique_synced_instance_name(&config, "Vvardenfell"),
+            "Vvardenfell (3)"
+        );
+        assert_eq!(unique_synced_instance_name(&config, "Balmora"), "Balmora");
     }
 }

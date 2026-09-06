@@ -55,6 +55,35 @@ pub fn instance_paths(nerevar_root: &Path, instance_name: &str) -> Result<Instan
     Ok(InstancePaths { root, data_dir })
 }
 
+/// A name no existing instance is using, by appending " (2)", " (3)"... to
+/// `desired` until it is free.
+///
+/// The join path names a synced instance after the host's own instance name,
+/// which the player never typed and cannot deduplicate themselves: two friends
+/// hosting "Vvardenfell" would otherwise collide on the folder
+/// `instance_paths` derives. Comparison ignores case and surrounding
+/// whitespace because the folder names derived from these do too on Windows.
+pub fn unique_instance_name(desired: &str, taken: &[String]) -> String {
+    let is_taken = |candidate: &str| {
+        taken
+            .iter()
+            .any(|name| name.trim().eq_ignore_ascii_case(candidate.trim()))
+    };
+
+    if !is_taken(desired) {
+        return desired.to_string();
+    }
+
+    let mut suffix = 2u32;
+    loop {
+        let candidate = format!("{desired} ({suffix})");
+        if !is_taken(&candidate) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
 /// Refuses an instance root that is already taken, so a create never writes
 /// into a directory somebody else owns.
 pub fn ensure_instance_path_available(instance_root: &Path) -> Result<(), String> {
@@ -172,5 +201,58 @@ mod tests {
         assert!(err.starts_with("Instance path already exists:"), "{err}");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod unique_name_tests {
+    use super::*;
+
+    fn names(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn a_free_name_is_returned_unchanged() {
+        assert_eq!(
+            unique_instance_name("Vvardenfell", &names(&["Solstheim"])),
+            "Vvardenfell"
+        );
+        assert_eq!(unique_instance_name("Vvardenfell", &[]), "Vvardenfell");
+    }
+
+    #[test]
+    fn a_taken_name_counts_up_from_two() {
+        assert_eq!(
+            unique_instance_name("Vvardenfell", &names(&["Vvardenfell"])),
+            "Vvardenfell (2)"
+        );
+        assert_eq!(
+            unique_instance_name(
+                "Vvardenfell",
+                &names(&["Vvardenfell", "Vvardenfell (2)", "Vvardenfell (3)"])
+            ),
+            "Vvardenfell (4)"
+        );
+    }
+
+    /// A gap is filled rather than skipped: the numbering says "free", not
+    /// "how many there have ever been".
+    #[test]
+    fn the_first_free_number_wins() {
+        assert_eq!(
+            unique_instance_name("Vvardenfell", &names(&["Vvardenfell", "Vvardenfell (3)"])),
+            "Vvardenfell (2)"
+        );
+    }
+
+    /// Windows folder names are case-insensitive, so two instances whose names
+    /// differ only in case would collide on disk.
+    #[test]
+    fn case_and_surrounding_space_do_not_make_a_name_free() {
+        assert_eq!(
+            unique_instance_name("Vvardenfell", &names(&["  vvardenfell "])),
+            "Vvardenfell (2)"
+        );
     }
 }

@@ -24,6 +24,7 @@ pub mod github_getters;
 pub mod instance_data;
 pub mod instance_setup;
 pub mod instance_settings;
+pub mod morrowind_locate;
 pub mod nerevar_server;
 pub mod openmw_ini_importer;
 pub mod port_conflict;

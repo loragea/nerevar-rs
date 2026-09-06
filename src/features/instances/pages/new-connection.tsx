@@ -15,12 +15,11 @@ import { useConfig } from "@/features/config/context/config-context-provider";
 import { RuntimeSourceField } from "@/features/instances/components/runtime-source-field";
 import { useBackgroundOperation } from "@/features/instances/context/background-operation-context";
 import { formatByteSize } from "@/lib/format";
-import { TES3MP_REPO } from "@/features/instances/schemas/runtime-source-schema";
-import type {
-  GithubReleaseResponse,
-  NewConnectionConfig,
-  RemoteManifestSummary,
-} from "@/types";
+import {
+  resolveHostRuntimeHint,
+  type HostRuntimeSuggestion,
+} from "@/features/instances/lib/host-runtime-hint";
+import type { NewConnectionConfig, RemoteManifestSummary } from "@/types";
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -45,11 +44,8 @@ export function NewConnectionPage() {
   const [preview, setPreview] = useState<RemoteManifestSummary | null>(null);
   // What the host suggested, kept only to say so on screen: the suggestion
   // is never stored anywhere but the `runtime` the user ends up confirming.
-  const [hostSuggestion, setHostSuggestion] = useState<{
-    repo: string;
-    tag: string;
-    resolved: boolean;
-  } | null>(null);
+  const [hostSuggestion, setHostSuggestion] =
+    useState<HostRuntimeSuggestion | null>(null);
   const [syncInstanceId, setSyncInstanceId] = useState("");
   // Where the instance would land, derived by the backend — the only place
   // that knows whether this platform separates paths with "/" or "\".
@@ -88,52 +84,15 @@ export function NewConnectionPage() {
     };
   }, [connectionName, nerevarRoot]);
 
-  /**
-   * Preselects the runtime the host advertises, if it advertises one.
-   *
-   * A suggestion is a starting point, never an instruction: the picker is set
-   * to the named GitHub repository (and to the named release when that repo
-   * still publishes it), the page says where the choice came from, and every
-   * part of it stays editable. A host that advertises nothing leaves the
-   * field exactly as it was.
-   */
+  /** Preselects the runtime the host advertises, if it advertises one. */
   const applyHostRuntimeHint = async (summary: RemoteManifestSummary) => {
-    const hint = summary.runtimeHint;
-    if (!hint || hint.kind !== "githubRelease") {
+    const hint = await resolveHostRuntimeHint(summary);
+    if (!hint) {
       setHostSuggestion(null);
       return;
     }
-
-    const repo = hint.repo || TES3MP_REPO;
-    let releaseId = "";
-    let tag = "";
-    try {
-      const releases = await invoke<GithubReleaseResponse[]>(
-        "get_all_releases",
-        { repo },
-      );
-      const match =
-        releases.find((release) => release.tag_name === hint.tag) ??
-        releases.find((release) => release.id.toString() === hint.releaseId);
-      if (match) {
-        releaseId = match.id.toString();
-        tag = match.tag_name;
-      }
-    } catch {
-      // The repository could not be listed (offline, renamed, private). The
-      // repo still goes into the picker, which reports the failure itself.
-    }
-
-    form.setValue(
-      "runtime",
-      { kind: "githubRelease", repo, releaseId, tag, assetName: "" },
-      { shouldValidate: false },
-    );
-    setHostSuggestion({
-      repo,
-      tag: hint.tag,
-      resolved: releaseId.length > 0,
-    });
+    form.setValue("runtime", hint.runtime, { shouldValidate: false });
+    setHostSuggestion(hint.suggestion);
   };
 
   const testConnection = async () => {
