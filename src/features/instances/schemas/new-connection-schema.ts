@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { hostAddressSchema } from "@/features/instances/schemas/host-address-schema";
 import {
   emptyRuntimeSource,
   runtimeSourceSchema,
@@ -16,11 +17,7 @@ export const newConnectionSchema = z.object({
     .max(500, "Description must be at most 500 characters"),
   instanceRootPath: z.string().min(3, "Instance root path is required"),
   instanceDataDir: z.string().min(3, "Data directory is required"),
-  remoteHost: z
-    .string()
-    .trim()
-    .min(1, "Remote host is required")
-    .max(253, "Host is too long"),
+  remoteHost: hostAddressSchema,
   remoteSyncPort: z
     .number()
     .int("Port must be a whole number")

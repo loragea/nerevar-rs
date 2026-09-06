@@ -3,24 +3,40 @@ use reqwest::Client;
 use crate::instance_data::NerevarManifest;
 use crate::sync_auth::SYNC_PASSWORD_HEADER;
 
+use super::host_address::{base_url, is_url_host};
 use super::types::RemoteManifestSummary;
 
-fn base_url(host: &str, port: u16) -> String {
-    let host = host.trim().trim_end_matches('/');
-    format!("http://{host}:{port}")
+/// Formats a transport failure against the base URL the request actually used —
+/// never a rebuilt one, so a URL host is reported exactly as it was reached.
+///
+/// `port_hint` is the configured sync port, and is `None` for a URL host: that
+/// address carries its own port (or the scheme's default), so naming the ignored
+/// `syncPort` field would only mislead.
+fn connection_error(
+    context: &str,
+    base: &str,
+    port_hint: Option<u16>,
+    err: reqwest::Error,
+) -> String {
+    if err.is_connect() {
+        match port_hint {
+            Some(port) => format!(
+                "{context} at {base}: could not connect. Ensure Nerevar is running and the sync server is listening on port {port}."
+            ),
+            None => format!(
+                "{context} at {base}: could not connect. Ensure Nerevar is running and the reverse proxy in front of it is reachable."
+            ),
+        }
+    } else if err.is_timeout() {
+        format!("{context} at {base}: request timed out.")
+    } else {
+        format!("{context} at {base}: {err}")
+    }
 }
 
-fn connection_error(context: &str, host: &str, port: u16, err: reqwest::Error) -> String {
-    let url = format!("http://{host}:{port}");
-    if err.is_connect() {
-        format!(
-            "{context} at {url}: could not connect. Ensure Nerevar is running and the sync server is listening on port {port}."
-        )
-    } else if err.is_timeout() {
-        format!("{context} at {url}: request timed out.")
-    } else {
-        format!("{context} at {url}: {err}")
-    }
+/// The sync port to name in a connection error, or `None` when `host` is a URL.
+fn port_hint(host: &str, port: u16) -> Option<u16> {
+    (!is_url_host(host)).then_some(port)
 }
 
 fn apply_sync_password(
@@ -35,13 +51,21 @@ fn apply_sync_password(
 
 pub async fn ping_nerevar_server(host: &str, port: u16) -> Result<(), String> {
     let client = Client::new();
-    let url = format!("{}/ping", base_url(host, port));
+    let base = base_url(host, port)?;
+    let url = format!("{base}/ping");
     let response = client
         .get(&url)
         .header("User-Agent", crate::USER_AGENT)
         .send()
         .await
-        .map_err(|e| connection_error("Failed to reach Nerevar server", host, port, e))?;
+        .map_err(|e| {
+            connection_error(
+                "Failed to reach Nerevar server",
+                &base,
+                port_hint(host, port),
+                e,
+            )
+        })?;
 
     if !response.status().is_success() {
         return Err(format!(
@@ -58,17 +82,22 @@ pub async fn fetch_manifest_summary(
     sync_password: Option<&str>,
 ) -> Result<RemoteManifestSummary, String> {
     let client = Client::new();
-    let url = format!("{}/", base_url(host, port));
+    let base = base_url(host, port)?;
+    let url = format!("{base}/");
     let request = apply_sync_password(
         client
             .get(&url)
             .header("User-Agent", crate::USER_AGENT),
         sync_password,
     );
-    let response = request
-        .send()
-        .await
-        .map_err(|e| connection_error("Failed to fetch manifest summary", host, port, e))?;
+    let response = request.send().await.map_err(|e| {
+        connection_error(
+            "Failed to fetch manifest summary",
+            &base,
+            port_hint(host, port),
+            e,
+        )
+    })?;
 
     if response.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE {
         return Err(
@@ -98,17 +127,17 @@ pub async fn fetch_full_manifest(
     sync_password: Option<&str>,
 ) -> Result<NerevarManifest, String> {
     let client = Client::new();
-    let url = format!("{}/manifest", base_url(host, port));
+    let base = base_url(host, port)?;
+    let url = format!("{base}/manifest");
     let request = apply_sync_password(
         client
             .get(&url)
             .header("User-Agent", crate::USER_AGENT),
         sync_password,
     );
-    let response = request
-        .send()
-        .await
-        .map_err(|e| connection_error("Failed to fetch manifest", host, port, e))?;
+    let response = request.send().await.map_err(|e| {
+        connection_error("Failed to fetch manifest", &base, port_hint(host, port), e)
+    })?;
 
     if response.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE {
         return Err(

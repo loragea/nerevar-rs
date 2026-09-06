@@ -18,6 +18,7 @@ use super::sync_state::{
     adopt_existing_files_into_state, clear_sync_state, count_verified_in_manifest, is_verified_in,
     SharedSyncState,
 };
+use super::host_address::base_url;
 use super::progress::emit_sync_progress;
 use super::types::SyncPhase;
 
@@ -91,11 +92,6 @@ fn maybe_emit_progress(
     }
 }
 
-fn base_url(host: &str, port: u16) -> String {
-    let host = host.trim().trim_end_matches('/');
-    format!("http://{host}:{port}")
-}
-
 struct DownloadJob {
     package_id: String,
     file_entry: ManifestFileEntry,
@@ -147,7 +143,7 @@ fn collect_download_jobs(
     force: bool,
     completed: &std::collections::HashMap<String, String>,
 ) -> Result<Vec<DownloadJob>, String> {
-    let base = base_url(host, port);
+    let base = base_url(host, port)?;
     let mut jobs = Vec::new();
 
     for package in &manifest.packages {
