@@ -77,6 +77,9 @@ repo root (see below) — not `src-tauri/bindings/`, which no longer exists.
   integration tests under `crates/nerevar-core/tests/`, and all of
   `nerevar-host` (which nothing depends on, so a bare `cargo check` never even
   compiles it).
+  Every crate inherits its version from `[workspace.package]` in
+  `src-tauri/Cargo.toml`; bump it there (and in `package.json` and
+  `src-tauri/tauri.conf.json`, which are separate).
 - `cargo build --release -p nerevar-host` — just the headless daemon; needs no
   Node/Tauri toolchain, which is the point on a server.
 - `cargo build --release -p nerevar-cli` — just the command-line client; same

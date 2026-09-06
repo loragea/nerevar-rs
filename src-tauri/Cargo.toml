@@ -1,12 +1,16 @@
 [workspace]
 members = ["crates/nerevar-core", "crates/nerevar-cli", "crates/nerevar-host"]
 
+[workspace.package]
+version = "0.1.10"
+edition = "2021"
+
 [package]
 name = "nerevar"
-version = "0.1.10"
+version.workspace = true
 description = "Morrowind Multiplayer without the mod-list headaches."
 authors = ["Kyle Austad"]
-edition = "2021"
+edition.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

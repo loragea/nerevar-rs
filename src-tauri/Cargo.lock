@@ -3101,7 +3101,7 @@ dependencies = [
 
 [[package]]
 name = "nerevar-cli"
-version = "0.1.0"
+version = "0.1.10"
 dependencies = [
  "clap",
  "log",
@@ -3116,7 +3116,7 @@ dependencies = [
 
 [[package]]
 name = "nerevar-core"
-version = "0.1.0"
+version = "0.1.10"
 dependencies = [
  "axum",
  "chrono",
@@ -3147,7 +3147,7 @@ dependencies = [
 
 [[package]]
 name = "nerevar-host"
-version = "0.1.0"
+version = "0.1.10"
 dependencies = [
  "axum-server",
  "clap",
