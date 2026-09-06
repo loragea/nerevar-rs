@@ -40,6 +40,7 @@ type ProcessStatusContextValue = {
     instanceId: string,
     role: ProcessRole,
     syncedClient?: boolean,
+    allowRuntimeMismatch?: boolean,
   ) => Promise<void>;
   stop: (role: ProcessRole) => Promise<void>;
   clear: (role: ProcessRole) => void;
@@ -175,7 +176,15 @@ export function ProcessStatusProvider({
   );
 
   const launch = useCallback(
-    async (instanceId: string, role: ProcessRole, syncedClient = false) => {
+    async (
+      instanceId: string,
+      role: ProcessRole,
+      syncedClient = false,
+      // Starts a synced client even though its host requires a TES3MP version
+      // this instance does not have. The backend blocks that launch unless it
+      // is asked to allow it.
+      allowRuntimeMismatch = false,
+    ) => {
       const command =
         role === "client" ? "launch_instance_client" : "launch_instance_server";
 
@@ -187,7 +196,12 @@ export function ProcessStatusProvider({
       }));
 
       try {
-        await invoke(command, { instanceId });
+        await invoke(
+          command,
+          role === "client"
+            ? { instanceId, allowRuntimeMismatch }
+            : { instanceId },
+        );
         setRoleState(role, (prev) => ({
           ...prev,
           running: true,
@@ -297,9 +311,12 @@ export function useInstanceProcess(
   const { client, server, launch, stop, clear, canLaunch } = useProcessStatus();
   const roleState = role === "client" ? client : server;
 
-  const launchThis = useCallback(async () => {
-    await launch(instanceId, role, syncedClient);
-  }, [instanceId, launch, role, syncedClient]);
+  const launchThis = useCallback(
+    async (allowRuntimeMismatch = false) => {
+      await launch(instanceId, role, syncedClient, allowRuntimeMismatch);
+    },
+    [instanceId, launch, role, syncedClient],
+  );
 
   return {
     lines: roleState.instanceId === instanceId ? roleState.lines : [],

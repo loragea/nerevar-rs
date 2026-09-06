@@ -55,15 +55,18 @@ pub(crate) use nerevar_core::AppState;
 use crate::data::GithubReleaseResponse;
 use crate::data::NerevarConfig;
 use crate::data::NewInstanceConfig;
-use nerevar_core::morrowind_locate::MorrowindCandidate;
-use nerevar_core::runtime::{RuntimeInspection, RuntimeSource};
 use crate::process_manager::ProcessManager;
 use crate::reporter::{EventSink, TauriEventSink};
 use crate::sync_client::SyncCoordinator;
 use crate::sync_host::{new_shared_hosting_manifest_cache, new_shared_sync_host};
+use nerevar_core::morrowind_locate::MorrowindCandidate;
+use nerevar_core::runtime::{
+    resolve_runtime_hint, RuntimeHintResolution, RuntimeInspection, RuntimeSource, TrustedRepo,
+    TrustedRuntimeRepos,
+};
 use std::sync::{Arc, Mutex};
-use tauri::{Manager, RunEvent};
 use tauri::State;
+use tauri::{Manager, RunEvent};
 use tokio::sync::watch;
 
 #[tauri::command]
@@ -142,6 +145,49 @@ fn pick_runtime_archive() -> Result<String, String> {
 #[tauri::command]
 fn inspect_runtime_source(source: RuntimeSource) -> Result<RuntimeInspection, String> {
     nerevar_core::runtime::inspect_source(&source)
+}
+
+/// The GitHub repositories this player trusts for TES3MP runtimes.
+#[tauri::command]
+fn get_trusted_runtime_repos(
+    state: State<'_, Mutex<AppState>>,
+) -> Result<Vec<TrustedRepo>, String> {
+    config::list_trusted_runtime_repos(state.inner())
+}
+
+/// Adds a repository to the trusted runtime sources. Only the settings screen
+/// calls this: a host can suggest a repository but never add one.
+#[tauri::command]
+fn add_trusted_runtime_repo(
+    state: State<'_, Mutex<AppState>>,
+    repo: String,
+) -> Result<Vec<TrustedRepo>, String> {
+    config::trust_runtime_repo(state.inner(), repo)
+}
+
+#[tauri::command]
+fn remove_trusted_runtime_repo(
+    state: State<'_, Mutex<AppState>>,
+    repo: String,
+) -> Result<Vec<TrustedRepo>, String> {
+    config::untrust_runtime_repo(state.inner(), repo)
+}
+
+/// What a host's advertised runtime may do to the runtime picker: preselect
+/// its repository and tag when the player trusts that repository, or say why
+/// it will not be used when they do not.
+#[tauri::command]
+fn resolve_host_runtime_hint(
+    state: State<'_, Mutex<AppState>>,
+    hint: Option<RuntimeSource>,
+) -> Result<RuntimeHintResolution, String> {
+    let guard = state
+        .lock()
+        .map_err(|_| "App state lock poisoned".to_string())?;
+    Ok(resolve_runtime_hint(
+        hint.as_ref(),
+        &TrustedRuntimeRepos::from_config(&guard.nerevar_config),
+    ))
 }
 
 #[tauri::command]
@@ -262,7 +308,8 @@ pub fn run() {
             // Build the sink once and reuse it everywhere below (AppState,
             // the startup port probe, and the server supervisor) instead of
             // constructing a fresh TauriEventSink per use.
-            let event_sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app.handle().clone()));
+            let event_sink: Arc<dyn EventSink> =
+                Arc::new(TauriEventSink::new(app.handle().clone()));
             app.state::<Mutex<AppState>>().lock().unwrap().event_sink = Some(event_sink.clone());
 
             // DISABLED CONFIG WATCHER FOR NOW AS EVEN INTERNAL CHANGES TRIGGER IT AND WILL
@@ -308,8 +355,7 @@ pub fn run() {
             app.manage(Arc::new(SyncCoordinator::new()));
             app.manage(Arc::new(ProcessManager::new()));
 
-            let server_ctx =
-                nerevar_server::state::ServerContext::new(sync_host, manifest_cache);
+            let server_ctx = nerevar_server::state::ServerContext::new(sync_host, manifest_cache);
             let startup_config = app
                 .state::<Mutex<AppState>>()
                 .lock()
@@ -354,6 +400,10 @@ pub fn run() {
             pick_runtime_directory,
             pick_runtime_archive,
             inspect_runtime_source,
+            get_trusted_runtime_repos,
+            add_trusted_runtime_repo,
+            remove_trusted_runtime_repo,
+            resolve_host_runtime_hint,
             open_directory,
             set_root_path,
             set_sync_port,
@@ -393,6 +443,7 @@ pub fn run() {
             connection::instance_edit::get_instance_connection_settings,
             connection::instance_edit::update_instance,
             connection::instance_edit::set_instance_runtime_hint,
+            connection::commands::update_instance_runtime,
             connection::instance_delete::delete_instance,
             port_conflict::check_port_conflicts,
             port_conflict::kill_port_process,

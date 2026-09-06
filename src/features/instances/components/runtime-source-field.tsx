@@ -7,6 +7,10 @@ import {
   TES3MP_REPO,
   type RuntimeSourceKind,
 } from "@/features/instances/schemas/runtime-source-schema";
+import {
+  isRepoTrusted,
+  useTrustedRuntimeRepos,
+} from "@/features/settings/hooks/use-trusted-runtime-repos";
 import { ReleaseSelector } from "@/features/tes3mp-releases/components/release-selector";
 import type { RuntimeInspection, RuntimeSource } from "@/types";
 import { invoke } from "@tauri-apps/api/core";
@@ -49,8 +53,10 @@ type InspectionState =
  *
  * `onBlockingChange` reports whether the current pick would fail the create:
  * a local source whose inspection lists missing pieces is not a TES3MP
- * runtime, and the backend would reject it after the copy. The form disables
- * its submit instead, so the user finds out on the pick.
+ * runtime, and the backend would reject it after the copy — and a GitHub
+ * repository that is not one of this player's trusted runtime sources, which
+ * the backend refuses to download from at all. The form disables its submit
+ * instead, so the user finds out on the pick.
  */
 export function RuntimeSourceField({
   value,
@@ -94,12 +100,20 @@ export function RuntimeSourceField({
       });
   }, [value.kind, path]);
 
-  const repoIsUsable =
-    value.kind === "githubRelease" && normalizeRepo(value.repo) !== null;
+  const { repos: trustedRepos } = useTrustedRuntimeRepos();
+  const normalizedRepo =
+    value.kind === "githubRelease" ? normalizeRepo(value.repo) : null;
+  const repoIsUsable = normalizedRepo !== null;
+  // A repository the player has not trusted is refused by the backend, so the
+  // form must not let the create start: Nerevar downloads and runs executables
+  // from here, and only the player's own trust list may widen where from.
+  const repoIsUntrusted =
+    normalizedRepo !== null && !isRepoTrusted(trustedRepos, normalizedRepo);
 
   const blocked =
     inspection.status === "checking" ||
     inspection.status === "error" ||
+    repoIsUntrusted ||
     (inspection.status === "ok" && inspection.inspection.missing.length > 0);
 
   useEffect(() => {
@@ -172,11 +186,22 @@ export function RuntimeSourceField({
               onChange={(event) => handleRepoChange(event.target.value)}
               onBlur={(event) => handleRepoBlur(event.target.value)}
             />
-            <p className="text-left font-sans text-xs leading-loose font-light tracking-[0.1em] text-foreground/75">
-              {repoIsUsable
-                ? `Releases published by ${normalizeRepo(value.repo)}. The official ${TES3MP_REPO} is the default; a fork that publishes its own builds goes here.`
-                : "Enter the repository as owner/name (a pasted github.com link works too)."}
-            </p>
+            {repoIsUntrusted ? (
+              <p className="flex items-start gap-2 text-left font-mono text-xs text-destructive">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                <span>
+                  {normalizedRepo} is not one of your trusted runtime sources.
+                  Nerevar will not download from it unless you add it under
+                  Settings.
+                </span>
+              </p>
+            ) : (
+              <p className="text-left font-sans text-xs leading-loose font-light tracking-[0.1em] text-foreground/75">
+                {repoIsUsable
+                  ? `Releases published by ${normalizedRepo}. The official ${TES3MP_REPO} is the default; a fork that publishes its own builds goes here.`
+                  : "Enter the repository as owner/name (a pasted github.com link works too)."}
+              </p>
+            )}
           </div>
           <ReleaseSelector
             value={value}

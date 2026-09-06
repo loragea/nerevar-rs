@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::runtime::RuntimeSource;
+use crate::instance_data::ManifestValidationResult;
+use crate::runtime::{RuntimeMismatch, RuntimeSource};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -62,6 +63,40 @@ pub struct InstanceSyncStatus {
     pub files_total: u32,
     #[serde(default)]
     pub percent_complete: u8,
+}
+
+/// Everything a completed sync has to say.
+///
+/// The file check is the sync's own verdict; the runtime mismatch is the
+/// host's version requirement measured against what this instance has
+/// installed, which a caller acts on separately — the app blocks the launch
+/// and offers the update, the CLI exits non-zero for `--launch`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SyncOutcome {
+    pub validation: ManifestValidationResult,
+    /// `None` when the host requires no particular TES3MP version, or when
+    /// the installed runtime already satisfies the one it requires.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_mismatch: Option<RuntimeMismatch>,
+}
+
+impl SyncOutcome {
+    /// Whether the files are in order *and* the runtime the host requires is
+    /// the one installed — the condition for launching.
+    pub fn ready_to_launch(&self) -> bool {
+        self.validation.valid && !self.blocks_launch()
+    }
+
+    /// Whether the runtime mismatch is one that must be resolved before the
+    /// client may start. A mismatch Nerevar cannot act on (a runtime the
+    /// player installed from their own disk) is reported, not enforced.
+    pub fn blocks_launch(&self) -> bool {
+        self.runtime_mismatch
+            .as_ref()
+            .is_some_and(|mismatch| mismatch.enforced)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

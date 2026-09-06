@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useConfig } from "@/features/config/context/config-context-provider";
 import { useSyncHostStatus } from "@/features/instances/hooks/use-sync-host-status";
+import { TrustedRuntimeSourcesSection } from "@/features/settings/components/trusted-runtime-sources-section";
 import { cn } from "@/lib/utils";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -139,6 +140,8 @@ export function NerevarSettingsPage() {
               ) : null}
             </div>
           </section>
+
+          <TrustedRuntimeSourcesSection />
 
           {config?.rootPath ? (
             <section className="space-y-2 rounded-lg border border-border/50 bg-background/30 px-3 py-3">

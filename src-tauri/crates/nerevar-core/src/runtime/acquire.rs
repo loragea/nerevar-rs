@@ -17,6 +17,7 @@ use crate::reporter::EventSink;
 use super::github::{fetch_release_by_id, find_asset_by_name, select_tes3mp_asset};
 use super::inspect::{inspect, RuntimeInfo};
 use super::source::{RuntimeSource, TargetPlatform};
+use super::trust::TrustedRuntimeRepos;
 
 /// Deletes its path when it goes out of scope, so the half-downloaded
 /// archive never survives an early return, an error, or a panic.
@@ -55,13 +56,22 @@ impl Drop for TempDownload {
 /// operation passes its own id so the events land on the banner it is already
 /// showing; anything else passes `None` and core mints one — no instance
 /// exists yet when a runtime is installed, so there is no instance id to use.
+///
+/// `trusted` is the player's trusted-repository list, and this is the choke
+/// point that enforces it: every path that puts a runtime on disk — the GUI's
+/// two create flows, the CLI's `--install-runtime`, a version-lock update —
+/// comes through here, so none of them can download from a repository the
+/// player has not trusted. Local sources are unaffected: a folder or an
+/// archive the player picked is a file they already have.
 pub async fn acquire(
     source: &RuntimeSource,
     dest: &Path,
     platform: TargetPlatform,
     sink: Arc<dyn EventSink>,
     operation_id: Option<String>,
+    trusted: &TrustedRuntimeRepos,
 ) -> Result<RuntimeInfo, String> {
+    trusted.require_trusted_source(source)?;
     let operation_id = operation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let mut progress = ProgressEmitter::new(sink, operation_id.clone(), operation_id);
 
@@ -156,13 +166,8 @@ async fn acquire_github_release(
         uuid::Uuid::new_v4()
     )));
 
-    let downloaded = stream_asset_to_file(
-        &asset.browser_download_url,
-        &temp.0,
-        &asset.name,
-        progress,
-    )
-    .await?;
+    let downloaded =
+        stream_asset_to_file(&asset.browser_download_url, &temp.0, &asset.name, progress).await?;
 
     progress.emit(
         BackgroundOperationPhase::ExtractingRuntime,
@@ -410,9 +415,13 @@ fn copy_symlink(src: &Path, dest: &Path, src_root: &Path) -> Result<(), String> 
     // so the rare link found there is copied as the file it points at.
     #[cfg(not(unix))]
     {
-        std::fs::copy(&resolved, dest)
-            .map(|_| ())
-            .map_err(|e| format!("Failed to copy {} to {}: {e}", resolved.display(), dest.display()))
+        std::fs::copy(&resolved, dest).map(|_| ()).map_err(|e| {
+            format!(
+                "Failed to copy {} to {}: {e}",
+                resolved.display(),
+                dest.display()
+            )
+        })
     }
 }
 
@@ -799,6 +808,7 @@ mod tests {
             TargetPlatform::Linux,
             Arc::new(CollectingEventSink::default()),
             None,
+            &TrustedRuntimeRepos::builtin_only(),
         )
         .await
         .expect("acquire failed");
@@ -841,7 +851,11 @@ mod tests {
         std::fs::create_dir_all(install.join("server/data")).unwrap();
         std::fs::create_dir_all(install.join("resources")).unwrap();
         std::fs::write(install.join(exe_name("tes3mp")), b"#!/bin/sh\nexit 0\n").unwrap();
-        std::fs::write(install.join(exe_name("tes3mp-server")), b"#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::write(
+            install.join(exe_name("tes3mp-server")),
+            b"#!/bin/sh\nexit 0\n",
+        )
+        .unwrap();
         std::fs::write(install.join("tes3mp-client-default.cfg"), b"[General]\n").unwrap();
         std::fs::write(install.join("tes3mp-server-default.cfg"), b"[General]\n").unwrap();
         std::fs::write(install.join("resources/version"), b"0.48.0\n7f9b\n").unwrap();
@@ -879,8 +893,36 @@ mod tests {
             TargetPlatform::current(),
             Arc::new(CollectingEventSink::default()),
             Some("test-op".to_string()),
+            &TrustedRuntimeRepos::builtin_only(),
         )
         .await
+    }
+
+    /// The check that keeps a hinted repository from ever becoming a download:
+    /// `acquire` refuses before it resolves a release or writes anything.
+    #[tokio::test]
+    async fn an_untrusted_repository_is_refused_without_touching_the_disk() {
+        let scratch = scratch("untrusted-repo");
+        let dest = scratch.0.join("instance/tes3mp");
+        let error = run_acquire(
+            &RuntimeSource::GithubRelease {
+                repo: "attacker/tes3mp".to_string(),
+                release_id: "1".to_string(),
+                tag: "0.8.1".to_string(),
+                asset_name: String::new(),
+            },
+            &dest,
+        )
+        .await
+        .expect_err("an untrusted repository must never be fetched");
+        assert!(
+            error.contains("not one of your trusted runtime sources"),
+            "{error}"
+        );
+        assert!(
+            !dest.exists(),
+            "nothing may be written for a refused source"
+        );
     }
 
     #[tokio::test]
@@ -908,7 +950,10 @@ mod tests {
                 .unwrap()
                 .permissions()
                 .mode();
-            assert!(mode & 0o111 != 0, "copied server is not executable ({mode:o})");
+            assert!(
+                mode & 0o111 != 0,
+                "copied server is not executable ({mode:o})"
+            );
         }
     }
 
@@ -967,11 +1012,16 @@ mod tests {
         std::fs::write(lib.join("libfoo.so.6.21.2"), b"binary").unwrap();
         std::os::unix::fs::symlink("libfoo.so.6.21.2", lib.join("libfoo.so.6")).unwrap();
 
-        run_acquire(&source_dir(&src), &dest).await.expect("acquire");
+        run_acquire(&source_dir(&src), &dest)
+            .await
+            .expect("acquire");
 
         let link = dest.join("TES3MP/lib/libfoo.so.6");
         assert!(
-            std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(),
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
             "the copy dereferenced the link"
         );
         assert_eq!(
@@ -1072,7 +1122,10 @@ mod tests {
         let mut writer = zip::ZipWriter::new(File::create(out).unwrap());
         for (relative, bytes, mode) in flatten_tree(tree) {
             writer
-                .start_file(relative, SimpleFileOptions::default().unix_permissions(mode))
+                .start_file(
+                    relative,
+                    SimpleFileOptions::default().unix_permissions(mode),
+                )
                 .unwrap();
             writer.write_all(&bytes).unwrap();
         }

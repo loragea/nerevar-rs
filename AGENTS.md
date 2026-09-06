@@ -25,8 +25,11 @@ Tauri 2 application, three parts:
     API (`github_getters.rs`; official `tes3mp/tes3mp` by default), a
     directory the user already has, or an archive on disk — `acquire`
     installs it *into* the instance's `tes3mp/`, `inspect` reports what
-    landed, and a host may *advertise* a `githubRelease` as its instance's
-    `runtime_hint` for connecting clients to preselect), and the supervisor
+    landed, `trust` holds the client's trusted-repository list — the only
+    thing that decides where a build may be downloaded from — and
+    `version_lock`/`update` let a host pin the TES3MP *tag* its players need
+    while its `runtime_hint`'s repository is honoured only when the player
+    already trusts it), and the supervisor
     that wires them together (`supervisor.rs`, `app_state.rs`). No Tauri
     dependency, so it's reusable by non-GUI frontends — which is what
     `nerevar-host` is.

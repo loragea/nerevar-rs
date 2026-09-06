@@ -17,7 +17,7 @@ import { useBackgroundOperation } from "@/features/instances/context/background-
 import { formatByteSize } from "@/lib/format";
 import {
   resolveHostRuntimeHint,
-  type HostRuntimeSuggestion,
+  type HostRuntimeHint,
 } from "@/features/instances/lib/host-runtime-hint";
 import type { NewConnectionConfig, RemoteManifestSummary } from "@/types";
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
@@ -44,8 +44,9 @@ export function NewConnectionPage() {
   const [preview, setPreview] = useState<RemoteManifestSummary | null>(null);
   // What the host suggested, kept only to say so on screen: the suggestion
   // is never stored anywhere but the `runtime` the user ends up confirming.
-  const [hostSuggestion, setHostSuggestion] =
-    useState<HostRuntimeSuggestion | null>(null);
+  const [hostSuggestion, setHostSuggestion] = useState<HostRuntimeHint | null>(
+    null,
+  );
   const [syncInstanceId, setSyncInstanceId] = useState("");
   // Where the instance would land, derived by the backend — the only place
   // that knows whether this platform separates paths with "/" or "\".
@@ -84,7 +85,12 @@ export function NewConnectionPage() {
     };
   }, [connectionName, nerevarRoot]);
 
-  /** Preselects the runtime the host advertises, if it advertises one. */
+  /**
+   * Preselects the runtime the host advertises, if it advertises one this
+   * player's trusted-source list allows. An untrusted suggestion still sets
+   * the field — to the official repository with no release chosen — and is
+   * reported rather than followed.
+   */
   const applyHostRuntimeHint = async (summary: RemoteManifestSummary) => {
     const hint = await resolveHostRuntimeHint(summary);
     if (!hint) {
@@ -92,7 +98,7 @@ export function NewConnectionPage() {
       return;
     }
     form.setValue("runtime", hint.runtime, { shouldValidate: false });
-    setHostSuggestion(hint.suggestion);
+    setHostSuggestion(hint);
   };
 
   const testConnection = async () => {
@@ -224,12 +230,14 @@ export function NewConnectionPage() {
                       onBlockingChange={setRuntimeBlocked}
                     />
                     {hostSuggestion ? (
-                      <p className="text-left font-mono text-xs text-accent/90">
-                        Suggested by the host: {hostSuggestion.repo}{" "}
-                        {hostSuggestion.tag || "(no release named)"}
-                        {hostSuggestion.resolved
-                          ? ""
-                          : " — not found in that repository; pick a release yourself"}
+                      <p
+                        className={
+                          hostSuggestion.trusted
+                            ? "text-left font-mono text-xs text-accent/90"
+                            : "text-left font-mono text-xs text-destructive"
+                        }
+                      >
+                        {hostSuggestion.notice}
                       </p>
                     ) : null}
                     {fieldState.error ? (

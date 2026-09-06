@@ -85,10 +85,13 @@ fn select_windows_asset<'a>(
     assets: &'a [GithubAssetResponse],
     release_id: &str,
 ) -> Result<&'a GithubAssetResponse, String> {
-    assets
-        .iter()
-        .find(|asset| asset.name.contains("Win64") && asset.name.ends_with(".zip"))
-        .ok_or_else(|| format!("No Windows zip asset found for release {release_id}"))
+    exactly_one(
+        assets
+            .iter()
+            .filter(|asset| asset.name.contains("Win64") && asset.name.ends_with(".zip")),
+        &format!("No Windows zip asset found for release {release_id}"),
+        "Windows",
+    )
 }
 
 /// Selection rule for Linux: the full client+server x86_64 tarball,
@@ -98,15 +101,44 @@ fn select_linux_asset<'a>(
     assets: &'a [GithubAssetResponse],
     release_id: &str,
 ) -> Result<&'a GithubAssetResponse, String> {
-    assets
-        .iter()
-        .find(|asset| {
+    exactly_one(
+        assets.iter().filter(|asset| {
             asset.name.contains("GNU+Linux")
                 && asset.name.contains("x86_64")
                 && asset.name.ends_with(".tar.gz")
                 && !asset.name.starts_with("tes3mp-server")
-        })
-        .ok_or_else(|| format!("No Linux x86_64 tar.gz asset found for release {release_id}"))
+        }),
+        &format!("No Linux x86_64 tar.gz asset found for release {release_id}"),
+        "Linux",
+    )
+}
+
+/// A naming convention only selects a build while it matches exactly one file.
+///
+/// Zero matches is the familiar case (a fork that names its assets its own
+/// way). More than one is the dangerous one: picking the first would make
+/// which build gets installed depend on the order GitHub happened to list the
+/// release's files in. Both are refused, and both name what was actually
+/// there, because the picker lets a user choose an asset by hand.
+fn exactly_one<'a>(
+    candidates: impl Iterator<Item = &'a GithubAssetResponse>,
+    none_error: &str,
+    platform: &str,
+) -> Result<&'a GithubAssetResponse, String> {
+    let matched: Vec<&GithubAssetResponse> = candidates.collect();
+    match matched.len() {
+        1 => Ok(matched[0]),
+        0 => Err(none_error.to_string()),
+        _ => Err(format!(
+            "{} assets in this release match the {platform} naming convention ({}), so Nerevar              cannot tell which one is the runtime — choose the asset yourself",
+            matched.len(),
+            matched
+                .iter()
+                .map(|asset| asset.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -275,6 +307,43 @@ mod tests {
                 "{platform:?} error did not name the assets: {error}"
             );
         }
+    }
+
+    /// Two files that both look like this platform's build: the first one in
+    /// the listing is not an answer, so the error names both and sends the
+    /// user to the picker.
+    #[test]
+    fn an_ambiguous_release_names_every_candidate() {
+        let release = release(
+            79,
+            vec![
+                asset("tes3mp-GNU+Linux-x86_64-release-0.8.1-aaa.tar.gz"),
+                asset("tes3mp-GNU+Linux-x86_64-release-0.8.1-bbb.tar.gz"),
+                asset("tes3mp.Win64.release.0.8.1.zip"),
+                asset("tes3mp.Win64.debug.0.8.1.zip"),
+            ],
+        );
+
+        let linux = select_tes3mp_asset(&release, TargetPlatform::Linux)
+            .err()
+            .expect("two Linux tarballs is not a choice Nerevar may make");
+        assert!(
+            linux.contains(
+                "2 assets in this release match the Linux naming convention \
+                 (tes3mp-GNU+Linux-x86_64-release-0.8.1-aaa.tar.gz, \
+                 tes3mp-GNU+Linux-x86_64-release-0.8.1-bbb.tar.gz)"
+            ),
+            "unexpected error: {linux}"
+        );
+        assert!(linux.contains("choose the asset yourself"), "{linux}");
+
+        let windows = select_tes3mp_asset(&release, TargetPlatform::Windows)
+            .err()
+            .expect("release and debug zips are two candidates");
+        assert!(
+            windows.contains("2 assets in this release match the Windows naming convention"),
+            "unexpected error: {windows}"
+        );
     }
 
     #[test]

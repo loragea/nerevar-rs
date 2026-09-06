@@ -13,7 +13,7 @@ import { RuntimeSourceField } from "@/features/instances/components/runtime-sour
 import { useBackgroundOperation } from "@/features/instances/context/background-operation-context";
 import {
   resolveHostRuntimeHint,
-  type HostRuntimeSuggestion,
+  type HostRuntimeHint,
 } from "@/features/instances/lib/host-runtime-hint";
 import { hostAddressError } from "@/features/instances/schemas/host-address-schema";
 import {
@@ -505,9 +505,7 @@ function JoinConnectStep({
   const [runtime, setRuntime] = useState<RuntimeSource>({
     ...emptyRuntimeSource,
   });
-  const [suggestion, setSuggestion] = useState<HostRuntimeSuggestion | null>(
-    null,
-  );
+  const [suggestion, setSuggestion] = useState<HostRuntimeHint | null>(null);
   // A local runtime the backend would reject: the join button stays disabled
   // rather than letting the create fail after the copy.
   const [runtimeBlocked, setRuntimeBlocked] = useState(false);
@@ -580,8 +578,10 @@ function JoinConnectStep({
 
       const hint = await resolveHostRuntimeHint(remoteSummary);
       if (hint) {
+        // An untrusted suggestion sets the field to the official repository
+        // with no release chosen; only a trusted one preselects the host's.
         setRuntime(hint.runtime);
-        setSuggestion(hint.suggestion);
+        setSuggestion(hint);
       } else {
         setSuggestion(null);
       }
@@ -678,12 +678,16 @@ function JoinConnectStep({
             <Label className="font-display text-[0.75rem] tracking-[0.3em] uppercase text-foreground/70">
               TES3MP version
             </Label>
-            <p className="font-serif text-sm text-foreground/70">
-              {!suggestion
-                ? "This server does not say which TES3MP build it runs. Pick the release to install."
-                : suggestion.resolved
-                  ? `Suggested by the host: ${suggestion.repo} ${suggestion.tag}.`
-                  : `Suggested by the host: ${suggestion.repo} ${suggestion.tag || "(no release named)"} — not found in that repository; pick a release yourself.`}
+            <p
+              className={
+                suggestion && !suggestion.trusted
+                  ? "font-serif text-sm text-destructive"
+                  : "font-serif text-sm text-foreground/70"
+              }
+            >
+              {suggestion
+                ? suggestion.notice
+                : "This server does not say which TES3MP build it runs. Pick the release to install."}
             </p>
             <RuntimeSourceField
               value={runtime}

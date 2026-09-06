@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { SyncProgressPanel } from "@/features/instances/components/sync-progress-panel";
 import { InstanceEditSection } from "@/features/instances/components/instance-edit-section";
 import { RuntimeHintSection } from "@/features/instances/components/runtime-hint-section";
+import { RuntimeMismatchNotice } from "@/features/instances/components/runtime-mismatch-notice";
 import { DeleteInstanceSection } from "@/features/instances/components/delete-instance-section";
 import { useConfig } from "@/features/config/context/config-context-provider";
 import { useInstanceProcess } from "@/features/instances/hooks/use-instance-process";
@@ -18,6 +19,7 @@ import { useProcessStatus } from "@/features/instances/context/process-status-co
 import { useInstanceSync } from "@/features/instances/hooks/use-instance-sync";
 import { isUrlHostAddress } from "@/features/instances/schemas/host-address-schema";
 import { cn } from "@/lib/utils";
+import type { RuntimeMismatch } from "@/types";
 import { InstanceConfig } from "@/types";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -205,11 +207,14 @@ function ClientPlayControls({
   description,
   synced = false,
   syncBusy = false,
+  runtimeMismatch = null,
 }: {
   instanceId: string;
   description: string;
   synced?: boolean;
   syncBusy?: boolean;
+  /** The host's TES3MP version requirement, when the installed build is not it. */
+  runtimeMismatch?: RuntimeMismatch | null;
 }) {
   const client = useInstanceProcess(instanceId, "client", synced);
   const { client: globalClient } = useProcessStatus();
@@ -218,6 +223,10 @@ function ClientPlayControls({
     (globalClient.instanceId !== null &&
       globalClient.instanceId !== instanceId &&
       (globalClient.running || globalClient.launching));
+  // A client on a different TES3MP build from the server it is joining does
+  // not work, so the launch waits for the update. The backend refuses it too;
+  // this only saves the round trip and explains why.
+  const versionBlocked = runtimeMismatch?.enforced ?? false;
 
   return (
     <DetailSection title="Play" description={description}>
@@ -225,13 +234,34 @@ function ClientPlayControls({
         variant="launch"
         className="h-10 w-full text-base"
         disabled={
-          client.running || client.launching || launchBlocked || syncBusy
+          client.running ||
+          client.launching ||
+          launchBlocked ||
+          syncBusy ||
+          versionBlocked
         }
         onClick={() => void client.launch()}
       >
         <Play data-icon="inline-start" />
         {client.launching ? "Checking updates…" : "Launch client"}
       </Button>
+      {versionBlocked ? (
+        <>
+          <p className="font-serif text-sm text-destructive">
+            {runtimeMismatch?.message} Update the runtime above before playing.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-10 w-full text-base"
+            disabled={client.running || client.launching || launchBlocked}
+            onClick={() => void client.launch(true)}
+          >
+            <Play data-icon="inline-start" />
+            Launch anyway
+          </Button>
+        </>
+      ) : null}
       <Button
         variant="outline"
         size="sm"
@@ -474,6 +504,16 @@ function SyncedInstanceDetail({ instance }: { instance: InstanceConfig }) {
     >
       <SyncedInstanceSyncPanel sync={sync} clientLaunching={client.launching} />
 
+      {sync.runtimeMismatch ? (
+        <RuntimeMismatchNotice
+          instanceId={instance.id}
+          instanceName={instance.name}
+          mismatch={sync.runtimeMismatch}
+          disabled={syncBusy}
+          onUpdated={sync.clearRuntimeMismatch}
+        />
+      ) : null}
+
       <DetailSection
         title="Connection"
         description={
@@ -525,6 +565,7 @@ function SyncedInstanceDetail({ instance }: { instance: InstanceConfig }) {
         instanceId={instance.id}
         synced
         syncBusy={syncBusy}
+        runtimeMismatch={sync.runtimeMismatch}
         description="Checks the host for mod updates, syncs if needed, then connects to the TES3MP server."
       />
 

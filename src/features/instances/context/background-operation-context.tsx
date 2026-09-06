@@ -17,7 +17,8 @@ export type BackgroundOperationKind =
   | "writeLaunchCfg"
   | "hostManifest"
   | "createInstance"
-  | "createConnection";
+  | "createConnection"
+  | "updateRuntime";
 
 export type BackgroundOperationStatus = "running" | "success" | "error";
 
@@ -49,6 +50,7 @@ const OPERATION_LABELS: Record<BackgroundOperationKind, string> = {
   hostManifest: "Building sync manifest",
   createInstance: "Creating instance",
   createConnection: "Creating connection",
+  updateRuntime: "Updating TES3MP runtime",
 };
 
 type RunOperationOptions<T> = {

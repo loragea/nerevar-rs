@@ -36,6 +36,7 @@ use nerevar_core::instance_data::{
 use nerevar_core::nerevar_server::state::ServerContext;
 use nerevar_core::nerevar_server::{serve, try_bind};
 use nerevar_core::reporter::{CollectingEventSink, EventSink};
+use nerevar_core::runtime::TrustedRuntimeRepos;
 use nerevar_core::sync_client::download::{download_manifest_files, DownloadOutcome};
 use nerevar_core::sync_client::sync::sync_if_needed;
 use nerevar_core::sync_client::sync_state::{is_verified_in, load_sync_state, sync_is_complete};
@@ -789,10 +790,20 @@ async fn sync_if_needed_reports_already_up_to_date_on_the_second_call() {
     let coordinator = Arc::new(SyncCoordinator::new());
 
     let first_sink = Arc::new(CollectingEventSink::default());
-    let first = sync_if_needed(first_sink.clone(), coordinator.clone(), &instance, false)
-        .await
-        .expect("first sync");
-    assert!(first.valid, "first sync issues: {:?}", first.issues);
+    let first = sync_if_needed(
+        first_sink.clone(),
+        coordinator.clone(),
+        &instance,
+        false,
+        &TrustedRuntimeRepos::builtin_only(),
+    )
+    .await
+    .expect("first sync");
+    assert!(
+        first.validation.valid,
+        "first sync issues: {:?}",
+        first.validation.issues
+    );
     assert!(
         !phase_events(&first_sink, "downloading").is_empty(),
         "the first sync must actually download"
@@ -811,10 +822,16 @@ async fn sync_if_needed_reports_already_up_to_date_on_the_second_call() {
     );
 
     let second_sink = Arc::new(CollectingEventSink::default());
-    let second = sync_if_needed(second_sink.clone(), coordinator, &instance, false)
-        .await
-        .expect("second sync");
-    assert!(second.valid);
+    let second = sync_if_needed(
+        second_sink.clone(),
+        coordinator,
+        &instance,
+        false,
+        &TrustedRuntimeRepos::builtin_only(),
+    )
+    .await
+    .expect("second sync");
+    assert!(second.validation.valid);
     assert!(
         phase_events(&second_sink, "downloading").is_empty(),
         "an up-to-date instance must not enter the Downloading phase"
