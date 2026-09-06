@@ -15,8 +15,6 @@ export const newConnectionSchema = z.object({
   connectionDescription: z
     .string()
     .max(500, "Description must be at most 500 characters"),
-  instanceRootPath: z.string().min(3, "Instance root path is required"),
-  instanceDataDir: z.string().min(3, "Data directory is required"),
   remoteHost: hostAddressSchema,
   remoteSyncPort: z
     .number()
@@ -32,8 +30,6 @@ export const newConnectionDefaultValues: NewConnectionFormValues = {
   runtime: { ...emptyRuntimeSource },
   connectionName: "",
   connectionDescription: "",
-  instanceRootPath: "",
-  instanceDataDir: "",
   remoteHost: "127.0.0.1",
   remoteSyncPort: 25567,
   syncPassword: "",

@@ -78,8 +78,11 @@ pub struct NewConnectionConfig {
     pub runtime: RuntimeSource,
     pub connection_name: String,
     pub connection_description: String,
-    pub instance_root_path: String,
-    pub instance_data_dir: String,
+    /// The Nerevar data directory the instance is created under. The
+    /// instance's own directories are derived from this and the connection
+    /// name by `instance_setup::instance_paths`, on the backend, because
+    /// only it knows the platform's path separator.
+    pub root_path: String,
     pub remote_host: String,
     pub remote_sync_port: u16,
     pub sync_password: String,
