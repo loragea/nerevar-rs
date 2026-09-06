@@ -62,21 +62,33 @@ pub fn scan_data_directory(
             );
         }
 
-        let plugins = find_plugins(&path);
-        let kind = classify_package(&path, &plugins);
-
-        packages.push(ScannedPackage {
-            name: folder_name.clone(),
-            kind,
-            relative_dir: folder_name,
-            plugins,
-            // Not computed here on purpose: see this function's doc comment.
-            tree_checksum: None,
-        });
+        packages.push(scan_package_dir(&folder_name, &path));
     }
 
     packages.sort_by(|a, b| a.relative_dir.cmp(&b.relative_dir));
     Ok(packages)
+}
+
+/// Classifies one package directory exactly as [`scan_data_directory`]
+/// classifies an immediate child of `data/`: the plugins it contains, and
+/// Mod-vs-Replacer from those plugins and its folder layout.
+///
+/// Split out so a package that is not (yet) in `data/` can be described the
+/// same way — the co-admin staging area extracts an upload somewhere else and
+/// still has to report the same `kind` and plugin list the data-dir scan
+/// would. Like the whole scan it hashes nothing, so `tree_checksum` is
+/// `None`.
+pub fn scan_package_dir(name: &str, dir: &Path) -> ScannedPackage {
+    let plugins = find_plugins(dir);
+    let kind = classify_package(dir, &plugins);
+    ScannedPackage {
+        name: name.to_string(),
+        kind,
+        relative_dir: name.to_string(),
+        plugins,
+        // Not computed here on purpose: see `scan_data_directory`'s doc comment.
+        tree_checksum: None,
+    }
 }
 
 pub fn should_skip_package_dir(name: &str) -> bool {

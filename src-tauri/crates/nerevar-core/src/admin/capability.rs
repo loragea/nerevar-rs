@@ -61,6 +61,34 @@ const ROLE_TABLE: &[(&str, &[Capability])] = &[(
     ],
 )];
 
+/// A role that grants only [`Capability::Status`], so the `403` branch of the
+/// capability guard can be exercised end to end while `admin` is still the
+/// only role that ships.
+///
+/// Compiled out of release builds entirely (`cfg(test)` for this crate's own
+/// tests, the `test-util` feature for `tests/`), so it is not a real role a
+/// host could ever be configured with — an `admins.json` naming it on a
+/// shipped binary resolves to an unknown role and authenticates nothing,
+/// exactly like any other typo. The name is deliberately unusable-looking.
+#[cfg(any(test, feature = "test-util"))]
+pub const ROLE_TEST_STATUS_ONLY: &str = "nerevar-test-status-only";
+
+#[cfg(any(test, feature = "test-util"))]
+const TEST_ROLE_TABLE: &[(&str, &[Capability])] = &[(ROLE_TEST_STATUS_ONLY, &[Capability::Status])];
+
+#[cfg(any(test, feature = "test-util"))]
+fn test_capabilities_for_role(role: &str) -> Option<&'static [Capability]> {
+    TEST_ROLE_TABLE
+        .iter()
+        .find(|(name, _)| *name == role)
+        .map(|(_, capabilities)| *capabilities)
+}
+
+#[cfg(not(any(test, feature = "test-util")))]
+fn test_capabilities_for_role(_role: &str) -> Option<&'static [Capability]> {
+    None
+}
+
 /// The capabilities `role` grants, or `None` when the name is not in the
 /// table. An unknown role is not an error here — it is a hand-edited or
 /// downgrade-stranded `admins.json`, and the caller decides what to do (the
@@ -70,6 +98,7 @@ pub fn capabilities_for_role(role: &str) -> Option<&'static [Capability]> {
         .iter()
         .find(|(name, _)| *name == role)
         .map(|(_, capabilities)| *capabilities)
+        .or_else(|| test_capabilities_for_role(role))
 }
 
 /// Whether `role` appears in the table at all.
@@ -105,6 +134,26 @@ mod tests {
                 "admin should grant {capability}"
             );
         }
+    }
+
+    /// The narrow role exists only in test builds, and it really is narrow:
+    /// the guard's 403 branch has something to reject with.
+    #[test]
+    fn the_test_only_role_grants_status_and_nothing_else() {
+        assert!(role_grants(ROLE_TEST_STATUS_ONLY, Capability::Status));
+        for denied in [
+            Capability::Stage,
+            Capability::Apply,
+            Capability::Restart,
+            Capability::ManageAdmins,
+        ] {
+            assert!(
+                !role_grants(ROLE_TEST_STATUS_ONLY, denied),
+                "the narrow role must not grant {denied}"
+            );
+        }
+        // It is not advertised as a role an operator may pick.
+        assert!(!known_role_names().contains(&ROLE_TEST_STATUS_ONLY));
     }
 
     #[test]

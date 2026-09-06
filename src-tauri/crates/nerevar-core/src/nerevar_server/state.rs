@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use crate::process_manager::ProcessManager;
@@ -22,6 +23,17 @@ pub struct ServerContext {
     /// when the embedder has one. `GET /admin/status` reports
     /// `tes3mpServerRunning: null` without it.
     pub process_manager: Option<Arc<ProcessManager>>,
+    /// Serializes every write under `/admin`. The staging routes wait for
+    /// it (two uploads must not read and write `pending.json` over each
+    /// other); apply takes it *without* waiting and answers 409 when it is
+    /// held, because an apply rewrites `data/` and hashes the whole tree and
+    /// a queued second one is never what the caller wanted.
+    pub admin_write_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Whether a running TES3MP server is enforcing a plugin list older than
+    /// the served manifest. Set by an apply that finds the game server up
+    /// (apply deliberately does not restart it); cleared by a restart, which
+    /// is a later milestone. Read by `GET /admin/status`.
+    pub tes3mp_plugin_list_stale: Arc<AtomicBool>,
 }
 
 impl ServerContext {
@@ -38,6 +50,8 @@ impl ServerContext {
             manifest_cache,
             sink: Arc::new(NullEventSink),
             process_manager: None,
+            admin_write_lock: Arc::new(tokio::sync::Mutex::new(())),
+            tes3mp_plugin_list_stale: Arc::new(AtomicBool::new(false)),
         }
     }
 

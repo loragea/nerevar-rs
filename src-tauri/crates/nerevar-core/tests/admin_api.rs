@@ -162,9 +162,13 @@ async fn admin_routes_authenticate_by_bearer_token() {
         .is_some_and(|a| a >= 0));
     // No process manager in this context, so the daemon-only fact is unknown.
     assert_eq!(status["tes3mpServerRunning"], serde_json::Value::Null);
-    // Milestone 2's placeholder is present and null, not absent.
+    // Nothing has been staged on this host, so the pending set is a present
+    // null rather than an empty object (`admin_staging_api.rs` covers the
+    // populated shape).
     assert!(status.as_object().unwrap().contains_key("pendingChanges"));
     assert_eq!(status["pendingChanges"], serde_json::Value::Null);
+    // Nothing has been applied either, so no running server is behind.
+    assert_eq!(status["tes3mpPluginListStale"], serde_json::json!(false));
 
     // ---- The audit line reached the sink, without the token ---------------------
     let events = audit.events();

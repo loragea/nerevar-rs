@@ -662,7 +662,7 @@ fn apply_unix_mode<R: std::io::Read>(
     Ok(())
 }
 
-fn extract_tar_gz(archive_path: &Path, dest: &Path) -> Result<(), String> {
+pub(crate) fn extract_tar_gz(archive_path: &Path, dest: &Path) -> Result<(), String> {
     let file = File::open(archive_path)
         .map_err(|e| format!("Failed to open {}: {e}", archive_path.display()))?;
     let tar = GzDecoder::new(std::io::BufReader::new(file));
