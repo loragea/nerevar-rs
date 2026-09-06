@@ -44,6 +44,15 @@ Tauri 2 application, three parts:
     must never gain a clap one. Operator-facing docs (instance layout without
     the GUI, systemd, day-2 mod updates): `docs/headless-hosting.md` and
     `packaging/systemd/nerevar-host.service`.
+  - `crates/nerevar-cli` (`nerevar-cli`) — the command-line client, a thin
+    library plus a `main.rs` so its tests drive the same functions the binary
+    does. Two surfaces: `nerevar-cli sync` is headless player-side sync (the
+    rig's stand-in for the GUI, and a fallback for a Linux user with no
+    desktop), `nerevar-cli admin` drives a headless host's `/admin` routes as
+    a co-admin over a bearer token. Like `nerevar-host` it is `nerevar-core`
+    plus clap/reqwest/tokio and no Tauri; unlike the desktop app it decides
+    nothing — every rule about what a sync or an apply means stays in core or
+    on the host.
 
 Command handlers registered in `src-tauri/src/lib.rs` are the frontend/backend
 boundary; most just resolve Tauri state and call straight into `nerevar-core`.
@@ -66,16 +75,20 @@ repo root (see below) — not `src-tauri/bindings/`, which no longer exists.
   compiles it).
 - `cargo build --release -p nerevar-host` — just the headless daemon; needs no
   Node/Tauri toolchain, which is the point on a server.
-- `cargo run -p nerevar-core --example sync_client -- --config <config.json>
-  --instance <id> [--install-runtime] [--force] [--launch]` — headless
+- `cargo build --release -p nerevar-cli` — just the command-line client; same
+  toolchain story as the daemon.
+- `cargo run -p nerevar-cli -- sync --config <config.json> --instance <id>
+  [--install-runtime] [--force] [--launch] [--onboard <Data Files>]` — headless
   client-side sync for one synced instance — optionally installing the
   instance's configured runtime first and launching the TES3MP client after —
   through the same core calls the app's sync/launch commands make. Prints core
-  events as JSON
-  lines; the doc comment at the top of
-  `crates/nerevar-core/examples/sync_client.rs` has the details. It is what a
-  test rig drives instead of the GUI, and a fallback for a Linux user with no
-  desktop. `cargo test --workspace` compiles it, so it cannot rot.
+  events as JSON lines; the module doc at the top of
+  `crates/nerevar-cli/src/sync.rs` has the details. It is what a test rig
+  drives instead of the GUI, and a fallback for a Linux user with no desktop.
+- `cargo run -p nerevar-cli -- admin --host <address> --token-file <path>
+  status` — the co-admin surface for a headless host: `status`, `upload`,
+  `remove`, `load-order get|set`, `enable`, `disable`, `order`, `apply`,
+  `discard`, `restart`. `docs/headless-hosting.md` is the operator guide.
 
 Rust stable toolchain; frontend uses pnpm (not npm/yarn).
 

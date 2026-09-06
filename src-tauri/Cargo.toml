@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/nerevar-core", "crates/nerevar-host"]
+members = ["crates/nerevar-core", "crates/nerevar-cli", "crates/nerevar-host"]
 
 [package]
 name = "nerevar"

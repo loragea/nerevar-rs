@@ -397,6 +397,58 @@ manifest rebuild takes. A restart is serialized with apply: a `409` means one
 of the two is already running. It is also a `409` on a `--sync-only` daemon,
 which has no game server to restart.
 
+### The nerevar-cli command
+
+`nerevar-cli admin` is the same routes with the `curl` removed. It ships from
+this repo (`cargo build --release -p nerevar-cli`), needs no Node or Tauri
+toolchain, and runs on the co-admin's own machine — the host does not have to
+have it. The `--host` address is the one the desktop app's connection form
+takes: a hostname or IP plus `--port` (default 25567), or a full `http(s)://`
+URL, which then carries its own port.
+
+The token goes in `--token-file <path>`, or in `NEREVAR_ADMIN_TOKEN`, or —
+last resort, because the process list is not private — in `--token`. It is
+never printed and never appears in an error message.
+
+On the host, once:
+
+```
+nerevar-host admin add ada > ada.token     # hand the file to Ada, privately
+```
+
+Then, from anywhere Ada is:
+
+```
+export NEREVAR_ADMIN_TOKEN=$(cat ada.token)
+export H=https://mw.example.org            # or: --host myhost --port 25567
+
+nerevar-cli admin --host $H status
+nerevar-cli admin --host $H upload "Better Bodies.zip"
+nerevar-cli admin --host $H enable "Better Bodies"
+nerevar-cli admin --host $H apply
+nerevar-cli admin --host $H restart
+```
+
+`upload` streams the archive off disk, so a multi-gigabyte package never lands
+in memory at either end, and names the package after the archive's file name
+unless `--name` says otherwise. `enable`, `disable` and `order <name>…` are
+the fetch-edit-post above done for you: each reads the load order the next
+apply will start from — the staged one if there is one, the one on disk
+otherwise — changes it, and stages the result. `order` moves the names it is
+given to the front, in that sequence, and leaves everything else in its
+existing relative order behind them. `load-order get [--pending]` and
+`load-order set <file.json>` are there for an edit none of those cover.
+
+Nothing is live until `apply`, and a running TES3MP server keeps the old
+plugin list until `restart` — which prompts first, because it kicks everyone
+connected; `--yes` skips the prompt for a script.
+
+Every command takes `--json`, which prints the host's response body verbatim
+instead of a summary, for scripting. A non-2xx prints the host's own `error`
+string and exits 1; a request that never reached a server names the address it
+tried.
+
+
 ### Roles
 
 Each admin record carries a **role**, and a role is a named set of
