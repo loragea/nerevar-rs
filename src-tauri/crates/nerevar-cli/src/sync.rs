@@ -1,19 +1,20 @@
-//! Headless client-side sync driver: sync one *synced* Nerevar instance from
-//! its host and, optionally, launch the TES3MP client for it — without the
-//! desktop app. Uses only `nerevar-core`'s public API, the same functions the
-//! Tauri commands `sync_instance_from_remote` / `launch_instance_client` call,
-//! so what it proves about sync and launch holds for the app too.
+//! `nerevar-cli sync` — headless client-side sync driver.
+//!
+//! Syncs one *synced* Nerevar instance from its host and, optionally, launches
+//! the TES3MP client for it, without the desktop app. Uses only
+//! `nerevar-core`'s public API, the same functions the Tauri commands
+//! `sync_instance_from_remote` / `launch_instance_client` call, so what it
+//! proves about sync and launch holds for the app too.
 //!
 //! It is a developer/rig tool that also serves a Linux user without a desktop:
 //! point it at the same `config.json` the app writes and the synced instance's
 //! id, and it fetches the host manifest, downloads or resumes the packages,
-//! writes the instance's launch cfg and patches its `tes3mp-client-default.cfg`
-//! with the host's game port and password.
+//! writes the instance's launch cfg and patches its
+//! `tes3mp-client-default.cfg` with the host's game port and password.
 //!
 //! ```text
-//! cargo run -p nerevar-core --example sync_client -- \
-//!     --config <nerevar config.json> --instance <id or name> \
-//!     [--install-runtime] [--force] [--launch]
+//! nerevar-cli sync --config <nerevar config.json> --instance <id or name> \
+//!     [--install-runtime] [--force] [--launch] \
 //!     [--onboard <Morrowind Data Files dir>]
 //!
 //!   --install-runtime
@@ -40,14 +41,15 @@
 //! composes the profile's `openmw.nerevar.cfg` with the instance launch cfg
 //! into the per-user OpenMW config dir (`$XDG_CONFIG_HOME/openmw` on Linux,
 //! `Documents/My Games/OpenMW` on Windows, `~/Library/Preferences/openmw` on
-//! macOS) for the client's lifetime and restores it afterwards. Run it with the
-//! environment you want the client to see, and never two at once per profile.
+//! macOS) for the client's lifetime and restores it afterwards. Run it with
+//! the environment you want the client to see, and never two at once per
+//! profile.
 //!
 //! Exit codes: 0 sync ok (and, with --launch, the client exited with 0 or was
 //! stopped cleanly on a signal); 1 validation failed; 2 error.
 
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -62,64 +64,14 @@ use nerevar_core::sync_client::{
     sync_if_needed, touch_last_synced, write_synced_client_connection, SyncCoordinator,
 };
 
-const USAGE: &str = "usage: sync_client --config <config.json> --instance <id-or-name> \
-[--install-runtime] [--force] [--launch] [--onboard <Morrowind Data Files dir>]";
+use crate::cli::SyncArgs;
 
 /// How long to wait for the exit watcher's `process-status` after the client
 /// is gone before giving up on its exit code.
 const EXIT_STATUS_GRACE: Duration = Duration::from_secs(3);
 
-struct Args {
-    config: PathBuf,
-    instance: String,
-    force: bool,
-    launch: bool,
-    install_runtime: bool,
-    onboard: Option<PathBuf>,
-}
-
-fn parse_args() -> Result<Args, String> {
-    let mut config = None;
-    let mut instance = None;
-    let mut force = false;
-    let mut launch = false;
-    let mut install_runtime = false;
-    let mut onboard = None;
-
-    let mut args = std::env::args().skip(1);
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--config" => config = Some(PathBuf::from(value_of(&mut args, "--config")?)),
-            "--instance" => instance = Some(value_of(&mut args, "--instance")?),
-            "--onboard" => onboard = Some(PathBuf::from(value_of(&mut args, "--onboard")?)),
-            "--force" => force = true,
-            "--launch" => launch = true,
-            "--install-runtime" => install_runtime = true,
-            "-h" | "--help" => {
-                println!("{USAGE}");
-                std::process::exit(0);
-            }
-            other => return Err(format!("unknown argument: {other}\n{USAGE}")),
-        }
-    }
-
-    Ok(Args {
-        config: config.ok_or_else(|| format!("--config is required\n{USAGE}"))?,
-        instance: instance.ok_or_else(|| format!("--instance is required\n{USAGE}"))?,
-        force,
-        launch,
-        install_runtime,
-        onboard,
-    })
-}
-
-fn value_of(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, String> {
-    args.next()
-        .ok_or_else(|| format!("{flag} needs a value\n{USAGE}"))
-}
-
 /// Prints every core event as one JSON line on stdout and forwards the
-/// client's exit (its `process-status` with `running: false`) to `main`.
+/// client's exit (its `process-status` with `running: false`) to [`run`].
 struct JsonLinesSink {
     client_exit: Mutex<Option<tokio::sync::mpsc::UnboundedSender<Option<i32>>>>,
 }
@@ -157,36 +109,6 @@ impl EventSink for JsonLinesSink {
         }
         print_event(event, payload);
     }
-}
-
-/// Minimal stderr logger so core's `log::` diagnostics (what it launched, what
-/// it restored) are visible; level from `RUST_LOG` (error|warn|info|debug|
-/// trace), default info. No `env_logger` here — it is not a core dependency.
-struct StderrLogger;
-
-static LOGGER: StderrLogger = StderrLogger;
-
-impl log::Log for StderrLogger {
-    fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= log::max_level()
-    }
-
-    fn log(&self, record: &log::Record) {
-        if self.enabled(record.metadata()) {
-            eprintln!("[{} {}] {}", record.level(), record.target(), record.args());
-        }
-    }
-
-    fn flush(&self) {}
-}
-
-fn install_logger() {
-    let level = std::env::var("RUST_LOG")
-        .ok()
-        .and_then(|v| v.parse::<log::LevelFilter>().ok())
-        .unwrap_or(log::LevelFilter::Info);
-    let _ = log::set_logger(&LOGGER);
-    log::set_max_level(level);
 }
 
 fn find_synced_instance(config: &NerevarConfig, key: &str) -> Option<InstanceConfig> {
@@ -229,7 +151,10 @@ fn persist_synced_instance(
 /// over a live tree would clobber the cfgs Nerevar has patched. "Complete"
 /// rather than "non-empty" is the test because the wrapper's own profile
 /// directory can exist beside a runtime that was never installed.
-async fn install_runtime(instance: &InstanceConfig, sink: Arc<dyn EventSink>) -> Result<(), String> {
+async fn install_runtime(
+    instance: &InstanceConfig,
+    sink: Arc<dyn EventSink>,
+) -> Result<(), String> {
     let source = instance.runtime.as_ref().ok_or_else(|| {
         format!(
             "Instance {} records no runtime source, so there is nothing to install",
@@ -273,7 +198,10 @@ async fn wait_for_shutdown_signal() {
     log::info!("Received Ctrl-C");
 }
 
-async fn run(args: Args) -> Result<i32, String> {
+/// Runs the sync, returning the process exit code: 0 ok, 1 the manifest
+/// validation failed. Every failure is an `Err`, which the caller reports as
+/// a `sync-error` line and exit 2.
+pub async fn run(args: SyncArgs) -> Result<i32, String> {
     if let Some(data_files) = &args.onboard {
         generate_default_global_openmw_config(data_files.to_string_lossy().into_owned()).await?;
         log::info!(
@@ -352,24 +280,15 @@ async fn run(args: Args) -> Result<i32, String> {
     Ok(0)
 }
 
-#[tokio::main]
-async fn main() {
-    install_logger();
-    let args = match parse_args() {
-        Ok(args) => args,
-        Err(err) => {
-            eprintln!("sync_client: {err}");
-            std::process::exit(2);
-        }
-    };
-
-    let code = match run(args).await {
+/// [`run`], with the failure convention the rig depends on: a `sync-error`
+/// event line on stdout, the message on stderr, exit 2.
+pub async fn run_reporting_errors(args: SyncArgs) -> i32 {
+    match run(args).await {
         Ok(code) => code,
         Err(err) => {
             print_event("sync-error", serde_json::Value::String(err.clone()));
-            eprintln!("sync_client: {err}");
+            eprintln!("nerevar-cli sync: {err}");
             2
         }
-    };
-    std::process::exit(code);
+    }
 }
