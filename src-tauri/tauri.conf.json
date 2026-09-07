@@ -44,13 +44,19 @@
       "deb": {
         "section": "games",
         "priority": "optional",
-        "desktopTemplate": "../packaging/linux/nerevar.desktop"
+        "desktopTemplate": "../packaging/linux/nerevar.desktop",
+        "files": {
+          "/usr/share/doc/nerevar/copyright": "../packaging/debian/copyright"
+        }
       },
       "rpm": {
         "release": "1",
         "epoch": 0,
         "depends": ["webkit2gtk4.1", "gtk3"],
-        "desktopTemplate": "../packaging/linux/nerevar.desktop"
+        "desktopTemplate": "../packaging/linux/nerevar.desktop",
+        "files": {
+          "/usr/share/licenses/nerevar/LICENSE": "../LICENSE"
+        }
       },
       "appimage": {
         "bundleMediaFramework": false
