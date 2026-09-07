@@ -67,6 +67,29 @@ export const runtimeSourceSchema = z.discriminatedUnion("kind", [
 
 export type RuntimeSourceKind = z.infer<typeof runtimeSourceSchema>["kind"];
 
+/**
+ * Checks a release asset file name a host means to advertise for one
+ * platform, returning the reason it is unusable or `null` when it is fine.
+ *
+ * Mirrors `runtime::source::normalize_asset_name` in the backend, which
+ * validates again — this copy exists so the field can say "that is not a file
+ * name" without a round trip. A blank name is not an error: it is how a host
+ * says "use the naming rules for this platform".
+ */
+export function assetNameError(name: string): string | null {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) return null;
+  if (
+    trimmed === "." ||
+    trimmed === ".." ||
+    trimmed.includes("/") ||
+    trimmed.includes("\\")
+  ) {
+    return "Give the release file's own name, with no path in it.";
+  }
+  return null;
+}
+
 export const TES3MP_REPO = "tes3mp/tes3mp";
 
 export const emptyRuntimeSource = {
