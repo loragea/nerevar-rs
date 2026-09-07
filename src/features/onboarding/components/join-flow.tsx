@@ -15,6 +15,7 @@ import {
   resolveHostRuntimeHint,
   type HostRuntimeHint,
 } from "@/features/instances/lib/host-runtime-hint";
+import { joinRuntimeScreen } from "@/features/instances/lib/join-runtime-choice";
 import { hostAddressError } from "@/features/instances/schemas/host-address-schema";
 import {
   emptyRuntimeSource,
@@ -478,15 +479,18 @@ function JoinGuideStep({
  * Step 4: the address, and the join itself.
  *
  * "Connect" pings the host and reads its manifest summary, which is what names
- * the server on screen and preselects the TES3MP runtime the host advertises.
- * The picker appears with that preselection and the second press installs it
- * and creates the instance — the New Connection page's two steps, with the
- * name, description and port fields dropped because the summary already
- * carries them.
+ * the server on screen and resolves the TES3MP runtime the host advertises.
+ * The second press installs that runtime and creates the instance — the New
+ * Connection page's two steps, with the name, description and port fields
+ * dropped because the summary already carries them.
  *
  * Why two presses and not one: which TES3MP build a player ends up running is
- * still the owner's-choice question nobody has ruled on, so the build is shown
- * and confirmed rather than installed on the player's behalf.
+ * the player's choice, so the build is shown and confirmed rather than
+ * installed on their behalf. What is shown depends on how definite the answer
+ * is. A trusted repository, a release that exists and a file to download from
+ * it is one sentence and one button; anything less — no suggestion, an
+ * untrusted one, a release that could not be found — is the full picker, with
+ * "Choose a different runtime" reaching it from the confirmation either way.
  */
 function JoinConnectStep({
   dataDir,
@@ -506,6 +510,9 @@ function JoinConnectStep({
     ...emptyRuntimeSource,
   });
   const [suggestion, setSuggestion] = useState<HostRuntimeHint | null>(null);
+  // Set when the player turns down the suggested build: the picker replaces
+  // the confirmation until they connect somewhere else.
+  const [picking, setPicking] = useState(false);
   // A local runtime the backend would reject: the join button stays disabled
   // rather than letting the create fail after the copy.
   const [runtimeBlocked, setRuntimeBlocked] = useState(false);
@@ -577,6 +584,7 @@ function JoinConnectStep({
       setSummary(remoteSummary);
 
       const hint = await resolveHostRuntimeHint(remoteSummary);
+      setPicking(false);
       if (hint) {
         // An untrusted suggestion sets the field to the official repository
         // with no release chosen; only a trusted one preselects the host's.
@@ -609,8 +617,13 @@ function JoinConnectStep({
     if (summary) {
       setSummary(null);
       setSuggestion(null);
+      setPicking(false);
+      setRuntimeBlocked(false);
     }
   };
+
+  const screen = joinRuntimeScreen(suggestion);
+  const confirming = screen.kind === "confirm" && !picking;
 
   return (
     <OnboardingStepCard>
@@ -678,23 +691,64 @@ function JoinConnectStep({
             <Label className="font-display text-[0.75rem] tracking-[0.3em] uppercase text-foreground/70">
               TES3MP version
             </Label>
-            <p
-              className={
-                suggestion && !suggestion.trusted
-                  ? "font-serif text-sm text-destructive"
-                  : "font-serif text-sm text-foreground/70"
-              }
-            >
-              {suggestion
-                ? suggestion.notice
-                : "This server does not say which TES3MP build it runs. Pick the release to install."}
-            </p>
-            <RuntimeSourceField
-              value={runtime}
-              onValueChange={setRuntime}
-              disabled={busy}
-              onBlockingChange={setRuntimeBlocked}
-            />
+            {confirming && screen.kind === "confirm" ? (
+              <>
+                <p className="font-serif text-sm text-foreground/80">
+                  This server uses TES3MP {screen.tag}. Download it from{" "}
+                  {screen.repo} now ({formatByteSize(screen.sizeBytes)})?
+                </p>
+                <p className="font-mono text-xs break-all text-foreground/55">
+                  {screen.assetName}
+                </p>
+                <button
+                  type="button"
+                  className="flex w-fit items-center gap-2 font-display text-[0.7rem] tracking-[0.25em] text-foreground/60 uppercase hover:text-accent"
+                  disabled={busy}
+                  onClick={() => setPicking(true)}
+                >
+                  <Settings2 className="size-3.5" />
+                  Choose a different runtime
+                </button>
+              </>
+            ) : (
+              <>
+                <p
+                  className={
+                    suggestion && !suggestion.trusted
+                      ? "font-serif text-sm text-destructive"
+                      : "font-serif text-sm text-foreground/70"
+                  }
+                >
+                  {suggestion
+                    ? suggestion.notice
+                    : "This server does not say which TES3MP build it runs. Pick the release to install."}
+                </p>
+                <RuntimeSourceField
+                  value={runtime}
+                  onValueChange={setRuntime}
+                  disabled={busy}
+                  onBlockingChange={setRuntimeBlocked}
+                />
+                {screen.kind === "confirm" ? (
+                  <button
+                    type="button"
+                    className="flex w-fit items-center gap-2 font-display text-[0.7rem] tracking-[0.25em] text-foreground/60 uppercase hover:text-accent"
+                    disabled={busy}
+                    onClick={() => {
+                      // Back to the host's build: the field is unmounted, so
+                      // whatever it was reporting about the player's own pick
+                      // no longer applies.
+                      if (suggestion) setRuntime(suggestion.runtime);
+                      setRuntimeBlocked(false);
+                      setPicking(false);
+                    }}
+                  >
+                    <Settings2 className="size-3.5" />
+                    Back to the suggested build
+                  </button>
+                ) : null}
+              </>
+            )}
           </div>
         ) : null}
 
@@ -716,6 +770,7 @@ function JoinConnectStep({
           busy ||
           host.trim().length === 0 ||
           (summary !== null &&
+            !confirming &&
             (runtimeBlocked || !runtimeSourceSchema.safeParse(runtime).success))
         }
       />
