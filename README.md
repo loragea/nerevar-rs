@@ -142,7 +142,7 @@ Connection details can be edited later from the instance settings page without r
 
 ### Trusted runtime sources
 
-Nerevar downloads and runs a TES3MP build, so **which repository that build comes from is your decision, never the server's**. The app trusts the official `tes3mp/tes3mp` repository out of the box, and **Settings → Trusted runtime sources** is where you add another — a fork whose releases you want to run — by typing its `owner/name` yourself.
+Nerevar downloads and runs a TES3MP build, so **which repository that build comes from is your decision, never the server's**. The app trusts the official `tes3mp/tes3mp` repository and the MundusPatensMP fork (`loragea/MundusPatensMP`) out of the box, and **Settings → Trusted runtime sources** is where you add another — a fork whose releases you want to run — by typing its `owner/name` yourself.
 
 A server *can* say which TES3MP version it needs, and Nerevar honours that: at every sync it compares the required version with the one installed, offers to install the right one, and holds the launch until you do. If the server also suggests a repository you have not trusted, Nerevar tells you so and downloads nothing from it — it looks for the required version in the repository your instance already uses instead. A server owner running a fork will tell you which repository to add.
 
@@ -182,7 +182,7 @@ If you use MO2, Nerevar includes an export plugin workflow (see the **MO2 Plugin
 
 ## Settings
 
-From **Settings** you can change Nerevar’s sync port and related configuration. Changing the sync port restarts the local sync server so connected workflows use the new value. **Trusted runtime sources** lists the GitHub repositories Nerevar may download a TES3MP build from — the built-in official one, which cannot be removed, plus any you add by typing its `owner/name`.
+From **Settings** you can change Nerevar’s sync port and related configuration. Changing the sync port restarts the local sync server so connected workflows use the new value. **Trusted runtime sources** lists the GitHub repositories Nerevar may download a TES3MP build from — the built-in ones (official TES3MP and the MundusPatensMP fork), which cannot be removed, plus any you add by typing its `owner/name`.
 
 ---
 
