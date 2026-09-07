@@ -1,0 +1,192 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The tag is what the in-app updater compares against
+  # (src-tauri/src/app_update.rs parses the semver out of it), so a tag that
+  # disagrees with the version in the tree would ship an update that never
+  # settles. Fail here rather than after two long builds.
+  verify-version:
+    name: Tag matches the tree
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: check
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          conf=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          pkg=$(node -p "require('./package.json').version")
+          cargo_version=$(sed -n '/^\[workspace\.package\]/,/^\[/p' src-tauri/Cargo.toml |
+            sed -n 's/^version *= *"\(.*\)"/\1/p' | head -1)
+          echo "tag=$tag tauri.conf.json=$conf package.json=$pkg Cargo.toml=$cargo_version"
+          for v in "$conf" "$pkg" "$cargo_version"; do
+            if [ "$v" != "$tag" ]; then
+              echo "::error::version mismatch: tag $tag, tree $conf/$pkg/$cargo_version" >&2
+              exit 1
+            fi
+          done
+          echo "version=$tag" >>"$GITHUB_OUTPUT"
+
+  linux:
+    name: Linux bundles
+    needs: verify-version
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            libayatana-appindicator3-dev \
+            patchelf \
+            rpm \
+            dpkg-dev \
+            build-essential \
+            curl \
+            wget \
+            file
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # deb, rpm and AppImage, from bundle.targets in tauri.conf.json (the
+      # Windows entries there are filtered out by the bundler on Linux). The
+      # AppImage step downloads linuxdeploy from GitHub, so this job needs
+      # network access — it is not an offline build.
+      - name: Build the desktop bundles
+        run: pnpm tauri build
+
+      # The daemon package: nerevar-host + nerevar-cli under /usr/bin, the
+      # systemd unit (disabled), /etc/nerevar, and the operator guide.
+      - name: Build the nerevar-host deb
+        run: packaging/build-host-deb.sh --out-dir "$GITHUB_WORKSPACE/dist"
+
+      # A plain tarball for anyone not on a deb/rpm/Arch distro, or installing
+      # into a container image.
+      - name: Build the headless tarball
+        env:
+          VERSION: ${{ needs.verify-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd src-tauri
+          cargo build --release -p nerevar-host -p nerevar-cli
+          cd ..
+          stage="nerevar-host-${VERSION}-linux-x86_64"
+          mkdir -p "$stage"
+          cp src-tauri/target/release/nerevar-host "$stage/"
+          cp src-tauri/target/release/nerevar-cli "$stage/"
+          strip --strip-unneeded "$stage/nerevar-host" "$stage/nerevar-cli"
+          cp docs/headless-hosting.md LICENSE "$stage/"
+          cp packaging/systemd/nerevar-host.service "$stage/"
+          mkdir -p dist
+          tar -czf "dist/${stage}.tar.gz" "$stage"
+
+      - name: Collect the desktop bundles
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find src-tauri/target/release/bundle \
+            -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+            -exec cp {} dist/ \;
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+          if-no-files-found: error
+
+  windows:
+    name: Windows bundles
+    needs: verify-version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # MSI (WiX) and NSIS. The updater only ever downloads the NSIS
+      # `*-setup.exe`; the MSI is there for anyone deploying by policy.
+      - name: Build the Windows installers
+        run: pnpm tauri build --bundles msi,nsis
+
+      - name: Collect the installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find src-tauri/target/release/bundle \
+            -type f \( -name '*.msi' -o -name '*-setup.exe' \) \
+            -exec cp {} dist/ \;
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish the GitHub release
+    needs: [verify-version, linux, windows]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten and checksum
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find artifacts -type f -exec cp {} dist/ \;
+          cd dist
+          sha256sum -- * >sha256sums.txt
+          cat sha256sums.txt
+
+      # `gh` is preinstalled on the runner; no third-party action needed.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.verify-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Nerevar v${VERSION}" \
+            --generate-notes \
+            dist/*
