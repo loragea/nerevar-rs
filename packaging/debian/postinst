@@ -1,0 +1,54 @@
+#!/bin/sh
+# Creates the service account the shipped systemd unit runs as, and its home
+# under /srv/nerevar (where docs/headless-hosting.md puts the instance trees).
+# The unit is installed but never enabled: an operator has to write
+# /etc/nerevar/config.json and set an instance up before starting anything.
+set -e
+
+NEREVAR_USER=nerevar
+NEREVAR_HOME=/srv/nerevar
+
+case "$1" in
+configure)
+	if ! getent passwd "$NEREVAR_USER" >/dev/null; then
+		if command -v adduser >/dev/null 2>&1; then
+			adduser --system --group --quiet \
+				--home "$NEREVAR_HOME" \
+				--gecos "Nerevar headless TES3MP host" \
+				"$NEREVAR_USER"
+		else
+			useradd --system --user-group \
+				--home-dir "$NEREVAR_HOME" \
+				--shell /usr/sbin/nologin \
+				--comment "Nerevar headless TES3MP host" \
+				"$NEREVAR_USER"
+		fi
+	fi
+
+	# adduser --system does not create the home directory unless it is under
+	# /home, so create it here either way.
+	if [ ! -d "$NEREVAR_HOME" ]; then
+		mkdir -p "$NEREVAR_HOME"
+	fi
+	chown "$NEREVAR_USER":"$NEREVAR_USER" "$NEREVAR_HOME"
+	chmod 0755 "$NEREVAR_HOME"
+
+	# The config file itself is never created — the daemon refuses to invent
+	# one — but the directory it is looked for in is ours to own.
+	chown root:"$NEREVAR_USER" /etc/nerevar
+	chmod 0750 /etc/nerevar
+
+	if [ -d /run/systemd/system ]; then
+		systemctl daemon-reload >/dev/null 2>&1 || true
+	fi
+	;;
+
+abort-upgrade | abort-remove | abort-deconfigure) ;;
+
+*)
+	echo "postinst called with unknown argument \`$1'" >&2
+	exit 1
+	;;
+esac
+
+exit 0
