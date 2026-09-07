@@ -23,7 +23,8 @@ use nerevar_core::nerevar_server::state::ServerContext;
 use nerevar_core::nerevar_server::{serve, try_bind};
 use nerevar_core::reporter::CollectingEventSink;
 use nerevar_core::runtime::{
-    resolve_runtime_hint, RuntimeHintResolution, RuntimeSource, TrustedRuntimeRepos,
+    resolve_runtime_hint, RuntimeHint, RuntimeHintResolution, RuntimeSource, TargetPlatform,
+    TrustedRuntimeRepos,
 };
 use nerevar_core::sync_client::{fetch_manifest_summary, sync_if_needed, SyncCoordinator};
 use nerevar_core::sync_host::{new_shared_hosting_manifest_cache, new_shared_sync_host};
@@ -82,12 +83,14 @@ async fn an_untrusted_hint_pins_the_version_but_never_the_repository() {
         host.hosting_instance_id = Some("version-lock-host".to_string());
         host.hosting_data_dir = Some(host_data.clone());
         host.hosting_instance_root = Some(host_root.clone());
-        host.hosting_runtime_hint = Some(RuntimeSource::GithubRelease {
-            repo: UNTRUSTED_REPO.to_string(),
-            release_id: "999".to_string(),
-            tag: REQUIRED_TAG.to_string(),
-            asset_name: String::new(),
-        });
+        host.hosting_runtime_hint = Some(RuntimeHint::from_source(
+            RuntimeSource::GithubRelease {
+                repo: UNTRUSTED_REPO.to_string(),
+                release_id: "999".to_string(),
+                tag: REQUIRED_TAG.to_string(),
+                asset_name: String::new(),
+            },
+        ));
     }
     let ctx = ServerContext::new(sync_host, new_shared_hosting_manifest_cache());
     let listener = try_bind(0).await.expect("bind ephemeral port");
@@ -211,7 +214,11 @@ async fn an_untrusted_hint_pins_the_version_but_never_the_repository() {
     let summary = fetch_manifest_summary("127.0.0.1", port, None)
         .await
         .expect("summary");
-    let resolution = resolve_runtime_hint(summary.runtime_hint.as_ref(), &trusted);
+    let resolution = resolve_runtime_hint(
+        summary.runtime_hint.as_ref(),
+        &trusted,
+        TargetPlatform::current(),
+    );
     let RuntimeHintResolution::Untrusted {
         repo,
         fallback_repo,

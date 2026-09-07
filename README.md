@@ -146,6 +146,8 @@ Nerevar downloads and runs a TES3MP build, so **which repository that build come
 
 A server *can* say which TES3MP version it needs, and Nerevar honours that: at every sync it compares the required version with the one installed, offers to install the right one, and holds the launch until you do. If the server also suggests a repository you have not trusted, Nerevar tells you so and downloads nothing from it — it looks for the required version in the repository your instance already uses instead. A server owner running a fork will tell you which repository to add.
 
+When a server suggests a build from a repository you already trust, joining asks you to confirm that one build — its version, the repository it comes from and how much there is to download — instead of showing the runtime picker; **Choose a different runtime** opens the picker if you want it.
+
 ---
 
 ## First-time setup

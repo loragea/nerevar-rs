@@ -14,7 +14,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use super::source::{RuntimeSource, DEFAULT_TES3MP_REPO};
+use super::source::{RuntimeHint, RuntimeSource, TargetPlatform, DEFAULT_TES3MP_REPO};
 use super::trust::TrustedRuntimeRepos;
 
 /// What a host's runtime suggestion means for this client's picker.
@@ -33,6 +33,10 @@ pub enum RuntimeHintResolution {
         repo: String,
         tag: String,
         release_id: String,
+        /// The asset file name the host named for *this* platform, empty
+        /// when it named none — in which case the naming rules in
+        /// `runtime::select_tes3mp_asset` pick the asset, as they always did.
+        asset_name: String,
     },
     /// The host names a repository this client does not trust. Nothing is
     /// preselected from it: the picker falls back to the official repository
@@ -55,16 +59,25 @@ pub enum RuntimeHintResolution {
 /// server's to set and the repository is not — a hinted repository is honoured
 /// only when the player already trusts it, and is otherwise reported without
 /// being preselected, downloaded, or stored.
+///
+/// `platform` is the platform the runtime is being installed for, which is
+/// what decides which of the hint's per-platform asset names (if any) the
+/// resolved source carries. The hint's own single `asset_name` is ignored, as
+/// it always has been: one file name cannot be right on every platform.
 pub fn resolve_runtime_hint(
-    hint: Option<&RuntimeSource>,
+    hint: Option<&RuntimeHint>,
     trusted: &TrustedRuntimeRepos,
+    platform: TargetPlatform,
 ) -> RuntimeHintResolution {
-    let Some(RuntimeSource::GithubRelease {
+    let Some(hint) = hint else {
+        return RuntimeHintResolution::NoHint;
+    };
+    let RuntimeSource::GithubRelease {
         repo,
         release_id,
         tag,
         ..
-    }) = hint
+    } = &hint.source
     else {
         return RuntimeHintResolution::NoHint;
     };
@@ -82,6 +95,11 @@ pub fn resolve_runtime_hint(
             repo,
             tag: tag.clone(),
             release_id: release_id.clone(),
+            asset_name: hint
+                .platform_assets
+                .get(platform)
+                .unwrap_or_default()
+                .to_string(),
         }
     } else {
         RuntimeHintResolution::Untrusted {
@@ -242,6 +260,7 @@ pub fn runtime_mismatch(
 mod tests {
     use super::*;
     use crate::data::NerevarConfig;
+    use crate::runtime::PlatformAssets;
     use crate::runtime::trust::add_trusted_repo;
 
     fn github(repo: &str, tag: &str) -> RuntimeSource {
@@ -253,6 +272,10 @@ mod tests {
         }
     }
 
+    fn hint(repo: &str, tag: &str) -> RuntimeHint {
+        RuntimeHint::from_source(github(repo, tag))
+    }
+
     fn trusting(repo: &str) -> TrustedRuntimeRepos {
         let mut config = NerevarConfig::default();
         add_trusted_repo(&mut config, repo).expect("a repository");
@@ -262,7 +285,11 @@ mod tests {
     #[test]
     fn no_hint_resolves_to_nothing() {
         assert_eq!(
-            resolve_runtime_hint(None, &TrustedRuntimeRepos::builtin_only()),
+            resolve_runtime_hint(
+                None,
+                &TrustedRuntimeRepos::builtin_only(),
+                TargetPlatform::Linux
+            ),
             RuntimeHintResolution::NoHint
         );
     }
@@ -271,24 +298,33 @@ mod tests {
     /// suggestion at all rather than as an instruction to read a path.
     #[test]
     fn a_local_hint_resolves_to_nothing() {
-        let local = RuntimeSource::LocalDirectory {
+        let local = RuntimeHint::from_source(RuntimeSource::LocalDirectory {
             path: "/srv/tes3mp".to_string(),
-        };
+        });
         assert_eq!(
-            resolve_runtime_hint(Some(&local), &TrustedRuntimeRepos::builtin_only()),
+            resolve_runtime_hint(
+                Some(&local),
+                &TrustedRuntimeRepos::builtin_only(),
+                TargetPlatform::Linux
+            ),
             RuntimeHintResolution::NoHint
         );
     }
 
     #[test]
     fn a_trusted_hint_preselects_the_repository_and_the_tag() {
-        let hint = github(DEFAULT_TES3MP_REPO, "tes3mp-0.8.1");
+        let hint = hint(DEFAULT_TES3MP_REPO, "tes3mp-0.8.1");
         assert_eq!(
-            resolve_runtime_hint(Some(&hint), &TrustedRuntimeRepos::builtin_only()),
+            resolve_runtime_hint(
+                Some(&hint),
+                &TrustedRuntimeRepos::builtin_only(),
+                TargetPlatform::Linux
+            ),
             RuntimeHintResolution::Trusted {
                 repo: DEFAULT_TES3MP_REPO.to_string(),
                 tag: "tes3mp-0.8.1".to_string(),
                 release_id: "4242".to_string(),
+                asset_name: String::new(),
             }
         );
     }
@@ -297,21 +333,77 @@ mod tests {
     /// player added is honoured exactly like the official repository.
     #[test]
     fn a_player_added_repository_makes_its_hint_trusted() {
-        let hint = github("Victor/MundusPatensMP", "0.9.0");
+        let hint = hint("Victor/MundusPatensMP", "0.9.0");
         assert_eq!(
-            resolve_runtime_hint(Some(&hint), &trusting("victor/munduspatensmp")),
+            resolve_runtime_hint(
+                Some(&hint),
+                &trusting("victor/munduspatensmp"),
+                TargetPlatform::Linux
+            ),
             RuntimeHintResolution::Trusted {
                 repo: "Victor/MundusPatensMP".to_string(),
                 tag: "0.9.0".to_string(),
                 release_id: "4242".to_string(),
+                asset_name: String::new(),
             }
+        );
+    }
+
+    /// The per-platform map is what a fork's own asset names travel in: each
+    /// platform gets the name meant for it, and a platform the host did not
+    /// name falls back to the naming rules (an empty `asset_name`).
+    #[test]
+    fn a_trusted_hint_carries_this_platforms_asset_name() {
+        let mut hinted = hint("Victor/MundusPatensMP", "0.9.0");
+        hinted.platform_assets = PlatformAssets {
+            windows: Some("MundusPatensMP-win64.zip".to_string()),
+            linux: Some("MundusPatensMP-linux-x86_64.tar.gz".to_string()),
+            macos: None,
+        };
+        let trusted = trusting("victor/munduspatensmp");
+
+        for (platform, expected) in [
+            (TargetPlatform::Windows, "MundusPatensMP-win64.zip"),
+            (TargetPlatform::Linux, "MundusPatensMP-linux-x86_64.tar.gz"),
+            (TargetPlatform::MacOs, ""),
+        ] {
+            let resolution = resolve_runtime_hint(Some(&hinted), &trusted, platform);
+            let RuntimeHintResolution::Trusted { asset_name, .. } = resolution else {
+                panic!("a trusted repository resolves trusted: {resolution:?}");
+            };
+            assert_eq!(asset_name, expected, "wrong asset for {platform:?}");
+        }
+    }
+
+    /// The map is the host's *suggestion*, so it cannot smuggle a download
+    /// past the trust list: an untrusted hint still preselects nothing.
+    #[test]
+    fn an_untrusted_hints_platform_assets_are_not_used() {
+        let mut hinted = hint("attacker/tes3mp", "0.8.1");
+        hinted.platform_assets = PlatformAssets {
+            linux: Some("payload.tar.gz".to_string()),
+            ..PlatformAssets::default()
+        };
+
+        let resolution = resolve_runtime_hint(
+            Some(&hinted),
+            &TrustedRuntimeRepos::builtin_only(),
+            TargetPlatform::Linux,
+        );
+        assert!(
+            matches!(resolution, RuntimeHintResolution::Untrusted { .. }),
+            "unexpected resolution: {resolution:?}"
         );
     }
 
     #[test]
     fn an_untrusted_hint_preselects_the_official_repo_and_no_tag() {
-        let hint = github("attacker/tes3mp", "0.8.1");
-        let resolution = resolve_runtime_hint(Some(&hint), &TrustedRuntimeRepos::builtin_only());
+        let hinted = hint("attacker/tes3mp", "0.8.1");
+        let resolution = resolve_runtime_hint(
+            Some(&hinted),
+            &TrustedRuntimeRepos::builtin_only(),
+            TargetPlatform::Linux,
+        );
         let RuntimeHintResolution::Untrusted {
             repo,
             tag,
@@ -334,9 +426,13 @@ mod tests {
 
     #[test]
     fn an_empty_hint_repo_means_the_official_one() {
-        let hint = github("", "0.8.1");
+        let hinted = hint("", "0.8.1");
         assert!(matches!(
-            resolve_runtime_hint(Some(&hint), &TrustedRuntimeRepos::builtin_only()),
+            resolve_runtime_hint(
+                Some(&hinted),
+                &TrustedRuntimeRepos::builtin_only(),
+                TargetPlatform::Linux
+            ),
             RuntimeHintResolution::Trusted { ref repo, .. } if repo == DEFAULT_TES3MP_REPO
         ));
     }

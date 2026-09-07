@@ -377,7 +377,7 @@ async fn check_runtime_version(
 
     let mismatch = runtime_mismatch(
         instance_id,
-        summary.runtime_hint.as_ref(),
+        summary.runtime_hint.as_ref().map(|hint| &hint.source),
         instance.runtime.as_ref(),
         trusted,
     )?;

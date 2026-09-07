@@ -169,7 +169,11 @@ slug out of band, alongside your address and password.
     "kind": "githubRelease",
     "repo": "owner/name",
     "releaseId": "",
-    "tag": "0.8.1"
+    "tag": "0.8.1",
+    "platformAssets": {
+      "windows": "mymp.Win64.release.0.8.1.zip",
+      "linux": "mymp-GNU+Linux-x86_64-release-0.8.1.tar.gz"
+    }
   }
 }
 ```
@@ -180,11 +184,24 @@ left empty) *and* what it enforces against every connected player's installed
 runtime. Only `"kind": "githubRelease"` can be advertised — a path on this
 machine means nothing on a player's — and the repository must be public, since
 Nerevar does not sign in to GitHub. Omit the key entirely to suggest nothing,
-which is the default; omit `tag` and you pin no version. `--check` reports what will be advertised, and says so
-when a hint is unusable and will be ignored:
+which is the default; omit `tag` and you pin no version.
+
+`platformAssets` is optional and only for a repository whose release files are
+not named the way the official TES3MP ones are. A client works out on its own
+which file of a release is the build for its platform, by the official naming;
+name a file here — one per platform, any of `windows`, `linux`, `macos`, each
+a plain file name with no path in it — and clients on that platform download
+that file instead. Leave a platform out and it falls back to the naming rules,
+so a fork that follows them needs none of this. A client whose release does not
+contain the file you named is told which name was missing from which release.
+
+`--check` reports what will be advertised, including any asset names, and says
+so when a hint is unusable and will be ignored:
 
 ```
   runtime hint:   suggests owner/name 0.8.1 to players
+  runtime asset:  windows players download mymp.Win64.release.0.8.1.zip
+  runtime asset:  linux players download mymp-GNU+Linux-x86_64-release-0.8.1.tar.gz
 ```
 
 ### 5. A load order

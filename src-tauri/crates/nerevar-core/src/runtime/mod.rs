@@ -20,10 +20,11 @@ pub mod update;
 pub mod version_lock;
 
 pub use acquire::acquire;
-pub use github::select_tes3mp_asset;
+pub use github::{find_asset_by_name, select_release_asset, select_tes3mp_asset};
 pub use inspect::{inspect, inspect_archive, inspect_source, RuntimeInfo, RuntimeInspection};
 pub use source::{
-    normalize_repo, normalize_runtime_hint, RuntimeSource, TargetPlatform, DEFAULT_TES3MP_REPO,
+    normalize_repo, normalize_runtime_hint, PlatformAssets, RuntimeHint, RuntimeSource,
+    TargetPlatform, DEFAULT_TES3MP_REPO,
 };
 pub use trust::{
     add_trusted_repo, is_trusted_repo, normalize_trusted_repo, remove_trusted_repo, trusted_repos,

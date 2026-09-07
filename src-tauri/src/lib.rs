@@ -61,8 +61,8 @@ use crate::sync_client::SyncCoordinator;
 use crate::sync_host::{new_shared_hosting_manifest_cache, new_shared_sync_host};
 use nerevar_core::morrowind_locate::MorrowindCandidate;
 use nerevar_core::runtime::{
-    resolve_runtime_hint, RuntimeHintResolution, RuntimeInspection, RuntimeSource, TrustedRepo,
-    TrustedRuntimeRepos,
+    resolve_runtime_hint, select_release_asset, RuntimeHint, RuntimeHintResolution,
+    RuntimeInspection, RuntimeSource, TargetPlatform, TrustedRepo, TrustedRuntimeRepos,
 };
 use std::sync::{Arc, Mutex};
 use tauri::State;
@@ -179,7 +179,7 @@ fn remove_trusted_runtime_repo(
 #[tauri::command]
 fn resolve_host_runtime_hint(
     state: State<'_, Mutex<AppState>>,
-    hint: Option<RuntimeSource>,
+    hint: Option<RuntimeHint>,
 ) -> Result<RuntimeHintResolution, String> {
     let guard = state
         .lock()
@@ -187,7 +187,28 @@ fn resolve_host_runtime_hint(
     Ok(resolve_runtime_hint(
         hint.as_ref(),
         &TrustedRuntimeRepos::from_config(&guard.nerevar_config),
+        TargetPlatform::current(),
     ))
+}
+
+/// The asset of `release` this machine would download: the one `asset_name`
+/// names, or the one the platform naming rules pick when it is empty.
+///
+/// The frontend asks so it can *show* the download — its file name and its
+/// size — before the player agrees to it. The answer comes from the same
+/// `select_release_asset` the installer uses, so the screen cannot promise a
+/// file the install would not fetch.
+#[tauri::command]
+fn select_runtime_asset(
+    release: GithubReleaseResponse,
+    asset_name: Option<String>,
+) -> Result<crate::data::GithubAssetResponse, String> {
+    select_release_asset(
+        &release,
+        TargetPlatform::current(),
+        asset_name.as_deref().unwrap_or_default(),
+    )
+    .cloned()
 }
 
 #[tauri::command]
@@ -389,6 +410,7 @@ pub fn run() {
         // REGISTER COMMANDS HERE
         .invoke_handler(tauri::generate_handler![
             get_all_releases,
+            select_runtime_asset,
             get_app_version,
             check_for_app_update,
             download_and_run_nerevar_update,

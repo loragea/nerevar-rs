@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::runtime::RuntimeSource;
+use crate::runtime::{RuntimeHint, RuntimeSource};
 
 #[derive(TS, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -31,8 +31,12 @@ pub struct InstanceConfig {
     /// `runtime::normalize_runtime_hint`) — a path on the host's disk means
     /// nothing on a player's machine. Absent means "no suggestion", which is
     /// what every config written before this field says.
+    ///
+    /// A `RuntimeHint` rather than a bare `RuntimeSource` because a host may
+    /// also name the release asset each platform should take; it serialises
+    /// flat, so a config written before that existed reads unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runtime_hint: Option<RuntimeSource>,
+    pub runtime_hint: Option<RuntimeHint>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_host: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -147,7 +151,7 @@ pub struct NerevarConfig {
 //     }
 // }
 
-#[derive(Serialize, Deserialize, TS)]
+#[derive(Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub struct GithubAssetResponse {

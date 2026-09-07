@@ -139,6 +139,120 @@ fn is_repo_segment(segment: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
+/// The asset file names a host names for the platforms its players run on.
+///
+/// The selection rules in [`crate::runtime::select_tes3mp_asset`] are written
+/// for the official TES3MP asset names; a fork that names its release files
+/// its own way matches none of them. This map is the host's way to say which
+/// file *is* the runtime on each platform. It lives beside the hint's
+/// [`RuntimeSource`] rather than inside it: a client stores the source it
+/// resolved, and the two names it will never use have no business in that
+/// record.
+///
+/// Every entry is optional and an absent one means "use the naming rule", so
+/// an empty map is exactly today's behaviour and is omitted from the JSON.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct PlatformAssets {
+    /// The asset that is the Windows build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub windows: Option<String>,
+    /// The asset that is the Linux build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linux: Option<String>,
+    /// The asset that is the macOS build.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub macos: Option<String>,
+}
+
+impl PlatformAssets {
+    /// True when the host named nothing, which is what every hint written
+    /// before this map existed says.
+    pub fn is_empty(&self) -> bool {
+        self.windows.is_none() && self.linux.is_none() && self.macos.is_none()
+    }
+
+    /// The asset the host named for `platform`, if any. A blank entry is no
+    /// entry: it is what an emptied text field sends.
+    pub fn get(&self, platform: TargetPlatform) -> Option<&str> {
+        let named = match platform {
+            TargetPlatform::Windows => self.windows.as_deref(),
+            TargetPlatform::Linux => self.linux.as_deref(),
+            TargetPlatform::MacOs => self.macos.as_deref(),
+        };
+        named.map(str::trim).filter(|name| !name.is_empty())
+    }
+
+    /// Trims every entry, drops the blank ones, and refuses anything that is
+    /// not a plain file name — a hint travels to other people's machines, and
+    /// the name it carries is matched against a release's assets, never
+    /// joined onto a path.
+    fn normalized(self) -> Result<Self, String> {
+        Ok(PlatformAssets {
+            windows: normalize_asset_name(self.windows, "Windows")?,
+            linux: normalize_asset_name(self.linux, "Linux")?,
+            macos: normalize_asset_name(self.macos, "macOS")?,
+        })
+    }
+}
+
+/// One entry of [`PlatformAssets`]: trimmed, blank read as absent, and
+/// checked to be a plain file name.
+fn normalize_asset_name(name: Option<String>, platform: &str) -> Result<Option<String>, String> {
+    let Some(name) = name else {
+        return Ok(None);
+    };
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    if trimmed == "."
+        || trimmed == ".."
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.chars().any(char::is_control)
+    {
+        return Err(format!(
+            "\"{trimmed}\" is not a {platform} asset file name — give the release file's own \
+             name, with no path in it"
+        ));
+    }
+    Ok(Some(trimmed.to_string()))
+}
+
+/// The runtime a host advertises to the players who connect to it.
+///
+/// A [`RuntimeSource`] — always a `githubRelease`, see
+/// [`normalize_runtime_hint`] — plus the per-platform asset names the host
+/// wants used instead of the naming rules. Serialized flat
+/// (`{"kind": "githubRelease", "repo": ..., "platformAssets": {...}}`), so a
+/// hint written before this type existed reads unchanged and a hint with no
+/// platform assets writes exactly the JSON it always did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RuntimeHint {
+    /// Where the build comes from. Only `githubRelease` is meaningful.
+    #[serde(flatten)]
+    pub source: RuntimeSource,
+    /// The asset each platform should download, when the naming rules do not
+    /// fit this repository's releases. Absent for every hint that does.
+    #[serde(default, skip_serializing_if = "PlatformAssets::is_empty")]
+    pub platform_assets: PlatformAssets,
+}
+
+impl RuntimeHint {
+    /// A hint that is just a source, with no per-platform asset names — what
+    /// every host advertised before the map existed.
+    pub fn from_source(source: RuntimeSource) -> Self {
+        RuntimeHint {
+            source,
+            platform_assets: PlatformAssets::default(),
+        }
+    }
+}
+
 /// Checks a runtime a host means to *advertise* to its players, normalising
 /// its repository and defaulting an empty one to [`DEFAULT_TES3MP_REPO`].
 ///
@@ -146,8 +260,15 @@ fn is_repo_segment(segment: &str) -> bool {
 /// are not the host's, and a path on the host's disk means nothing on a
 /// player's. A client never downloads from anywhere but the named GitHub
 /// repository, so that is the only shape a hint may take.
-pub fn normalize_runtime_hint(hint: RuntimeSource) -> Result<RuntimeSource, String> {
-    match hint {
+///
+/// The per-platform asset names are normalised the same way: trimmed, blanks
+/// dropped, and anything that is not a plain file name refused.
+pub fn normalize_runtime_hint(hint: RuntimeHint) -> Result<RuntimeHint, String> {
+    let RuntimeHint {
+        source,
+        platform_assets,
+    } = hint;
+    match source {
         RuntimeSource::GithubRelease {
             repo,
             release_id,
@@ -159,11 +280,14 @@ pub fn normalize_runtime_hint(hint: RuntimeSource) -> Result<RuntimeSource, Stri
             } else {
                 normalize_repo(&repo)?
             };
-            Ok(RuntimeSource::GithubRelease {
-                repo,
-                release_id,
-                tag,
-                asset_name,
+            Ok(RuntimeHint {
+                source: RuntimeSource::GithubRelease {
+                    repo,
+                    release_id,
+                    tag,
+                    asset_name,
+                },
+                platform_assets: platform_assets.normalized()?,
             })
         }
         RuntimeSource::LocalDirectory { .. } | RuntimeSource::Archive { .. } => Err(
@@ -361,32 +485,34 @@ mod tests {
 
     #[test]
     fn a_hint_normalises_its_repo_and_defaults_an_empty_one() {
-        let hint = normalize_runtime_hint(RuntimeSource::GithubRelease {
+        let hint = normalize_runtime_hint(RuntimeHint::from_source(RuntimeSource::GithubRelease {
             repo: "https://github.com/owner/name".to_string(),
             release_id: "42".to_string(),
             tag: "0.8.1".to_string(),
             asset_name: String::new(),
-        })
+        }))
         .expect("a github release is a valid hint");
         assert_eq!(
             hint,
-            RuntimeSource::GithubRelease {
+            RuntimeHint::from_source(RuntimeSource::GithubRelease {
                 repo: "owner/name".to_string(),
                 release_id: "42".to_string(),
                 tag: "0.8.1".to_string(),
                 asset_name: String::new(),
-            }
+            })
         );
 
-        let defaulted = normalize_runtime_hint(RuntimeSource::GithubRelease {
-            repo: String::new(),
-            release_id: String::new(),
-            tag: "0.8.1".to_string(),
-            asset_name: String::new(),
-        })
+        let defaulted = normalize_runtime_hint(RuntimeHint::from_source(
+            RuntimeSource::GithubRelease {
+                repo: String::new(),
+                release_id: String::new(),
+                tag: "0.8.1".to_string(),
+                asset_name: String::new(),
+            },
+        ))
         .expect("an empty repo falls back to the official one");
         assert!(matches!(
-            defaulted,
+            defaulted.source,
             RuntimeSource::GithubRelease { ref repo, .. } if repo == DEFAULT_TES3MP_REPO
         ));
     }
@@ -403,7 +529,8 @@ mod tests {
                 path: "/opt/tes3mp.zip".to_string(),
             },
         ] {
-            let error = normalize_runtime_hint(local).expect_err("a local hint is meaningless");
+            let error = normalize_runtime_hint(RuntimeHint::from_source(local))
+                .expect_err("a local hint is meaningless");
             assert!(
                 error.contains("must be a GitHub release"),
                 "unexpected error: {error}"
@@ -413,14 +540,135 @@ mod tests {
 
     #[test]
     fn a_hint_with_an_unusable_repo_is_rejected() {
-        let error = normalize_runtime_hint(RuntimeSource::GithubRelease {
+        let error = normalize_runtime_hint(RuntimeHint::from_source(RuntimeSource::GithubRelease {
             repo: "not a repo".to_string(),
             release_id: String::new(),
             tag: String::new(),
             asset_name: String::new(),
-        })
+        }))
         .expect_err("a malformed repo is not a hint");
         assert!(error.contains("owner/name"), "unexpected error: {error}");
+    }
+
+    fn hint_with(assets: PlatformAssets) -> RuntimeHint {
+        RuntimeHint {
+            source: RuntimeSource::GithubRelease {
+                repo: "owner/name".to_string(),
+                release_id: "42".to_string(),
+                tag: "0.9.0".to_string(),
+                asset_name: String::new(),
+            },
+            platform_assets: assets,
+        }
+    }
+
+    /// The whole point of the flattened shape: a hint with no platform assets
+    /// is byte-for-byte the JSON a build that predates the map wrote.
+    #[test]
+    fn a_hint_without_platform_assets_serialises_without_the_key() {
+        let hint = hint_with(PlatformAssets::default());
+        let json = serde_json::to_value(&hint).expect("serialize");
+
+        assert_eq!(json["kind"], "githubRelease");
+        assert_eq!(json["repo"], "owner/name");
+        assert_eq!(json["releaseId"], "42");
+        assert_eq!(json["tag"], "0.9.0");
+        assert!(
+            json.get("platformAssets").is_none(),
+            "unexpected key in {json}"
+        );
+
+        let source_json = serde_json::to_value(&hint.source).expect("serialize");
+        assert_eq!(json, source_json, "a map-less hint is just its source");
+    }
+
+    /// And the other direction: a hint file written before the map existed
+    /// still loads, with no platform assets named.
+    #[test]
+    fn a_hint_from_before_the_map_still_loads() {
+        let hint: RuntimeHint = serde_json::from_str(
+            r#"{"kind":"githubRelease","repo":"tes3mp/tes3mp","releaseId":"65767406",
+                "tag":"tes3mp-0.8.1","assetName":""}"#,
+        )
+        .expect("deserialize");
+
+        assert!(hint.platform_assets.is_empty());
+        assert!(matches!(hint.source, RuntimeSource::GithubRelease { .. }));
+    }
+
+    #[test]
+    fn a_hint_with_platform_assets_round_trips_through_json() {
+        let hint = hint_with(PlatformAssets {
+            windows: Some("MundusPatensMP-win64.zip".to_string()),
+            linux: Some("MundusPatensMP-linux-x86_64.tar.gz".to_string()),
+            macos: None,
+        });
+
+        let json = serde_json::to_value(&hint).expect("serialize");
+        assert_eq!(json["platformAssets"]["windows"], "MundusPatensMP-win64.zip");
+        assert_eq!(
+            json["platformAssets"]["linux"],
+            "MundusPatensMP-linux-x86_64.tar.gz"
+        );
+        assert!(
+            json["platformAssets"].get("macos").is_none(),
+            "an unnamed platform is omitted: {json}"
+        );
+
+        let back: RuntimeHint = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(back, hint);
+    }
+
+    #[test]
+    fn a_platform_asset_is_read_per_platform_and_blank_means_unnamed() {
+        let assets = PlatformAssets {
+            windows: Some("  build-win64.zip  ".to_string()),
+            linux: Some("   ".to_string()),
+            macos: None,
+        };
+
+        assert_eq!(assets.get(TargetPlatform::Windows), Some("build-win64.zip"));
+        assert_eq!(assets.get(TargetPlatform::Linux), None);
+        assert_eq!(assets.get(TargetPlatform::MacOs), None);
+        assert!(!assets.is_empty());
+        assert!(PlatformAssets::default().is_empty());
+    }
+
+    #[test]
+    fn normalisation_trims_platform_assets_and_drops_the_blank_ones() {
+        let hint = normalize_runtime_hint(hint_with(PlatformAssets {
+            windows: Some("  build-win64.zip ".to_string()),
+            linux: Some("".to_string()),
+            macos: Some("   ".to_string()),
+        }))
+        .expect("plain file names are usable");
+
+        assert_eq!(
+            hint.platform_assets,
+            PlatformAssets {
+                windows: Some("build-win64.zip".to_string()),
+                linux: None,
+                macos: None,
+            }
+        );
+    }
+
+    /// The name is matched against a release's assets, never joined onto a
+    /// path — so anything that is not a plain file name is refused at the
+    /// host, where the operator can still fix it.
+    #[test]
+    fn normalisation_rejects_a_platform_asset_that_is_not_a_file_name() {
+        for bad in ["../secrets", "dir/build.zip", "dir\\build.zip", ".", ".."] {
+            let error = normalize_runtime_hint(hint_with(PlatformAssets {
+                linux: Some(bad.to_string()),
+                ..PlatformAssets::default()
+            }))
+            .expect_err("{bad} is not a file name");
+            assert!(
+                error.contains("is not a Linux asset file name"),
+                "unexpected error for {bad}: {error}"
+            );
+        }
     }
 
     #[test]

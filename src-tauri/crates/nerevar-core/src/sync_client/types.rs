@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::instance_data::ManifestValidationResult;
-use crate::runtime::{RuntimeMismatch, RuntimeSource};
+use crate::runtime::{RuntimeHint, RuntimeMismatch};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -115,7 +115,7 @@ pub struct RemoteManifestSummary {
     /// host advertises nothing — which is also what a host older than the
     /// field sends, since it simply omits it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub runtime_hint: Option<RuntimeSource>,
+    pub runtime_hint: Option<RuntimeHint>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -161,6 +161,7 @@ pub struct ProcessStatusEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::{PlatformAssets, RuntimeSource};
 
     const SUMMARY_WITHOUT_HINT: &str = r#"{
         "instanceId": "host-1",
@@ -208,17 +209,49 @@ mod tests {
     fn a_hint_round_trips_through_the_summary_json() {
         let mut summary: RemoteManifestSummary =
             serde_json::from_str(SUMMARY_WITHOUT_HINT).expect("deserialize");
-        summary.runtime_hint = Some(RuntimeSource::GithubRelease {
+        summary.runtime_hint = Some(RuntimeHint::from_source(RuntimeSource::GithubRelease {
             repo: "owner/name".to_string(),
             release_id: "999".to_string(),
             tag: "v1.2.3".to_string(),
             asset_name: String::new(),
-        });
+        }));
 
         let json = serde_json::to_value(&summary).expect("serialize");
         assert_eq!(json["runtimeHint"]["kind"], "githubRelease");
         assert_eq!(json["runtimeHint"]["repo"], "owner/name");
         assert_eq!(json["runtimeHint"]["tag"], "v1.2.3");
+        assert!(
+            json["runtimeHint"].get("platformAssets").is_none(),
+            "a hint naming no assets sends the summary it always did: {json}"
+        );
+
+        let back: RemoteManifestSummary = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(back.runtime_hint, summary.runtime_hint);
+    }
+
+    /// The per-platform asset names travel with the hint, so a fork server can
+    /// tell its players which release file is the runtime on their platform.
+    #[test]
+    fn a_hints_platform_assets_travel_in_the_summary() {
+        let mut summary: RemoteManifestSummary =
+            serde_json::from_str(SUMMARY_WITHOUT_HINT).expect("deserialize");
+        summary.runtime_hint = Some(RuntimeHint {
+            source: RuntimeSource::GithubRelease {
+                repo: "owner/name".to_string(),
+                release_id: String::new(),
+                tag: "v1.2.3".to_string(),
+                asset_name: String::new(),
+            },
+            platform_assets: PlatformAssets {
+                windows: Some("fork-win64.zip".to_string()),
+                linux: Some("fork-linux.tar.gz".to_string()),
+                macos: None,
+            },
+        });
+
+        let json = serde_json::to_value(&summary).expect("serialize");
+        assert_eq!(json["runtimeHint"]["platformAssets"]["windows"], "fork-win64.zip");
+        assert_eq!(json["runtimeHint"]["platformAssets"]["linux"], "fork-linux.tar.gz");
 
         let back: RemoteManifestSummary = serde_json::from_value(json).expect("deserialize");
         assert_eq!(back.runtime_hint, summary.runtime_hint);

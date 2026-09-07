@@ -11,6 +11,8 @@ export * from "./SettingValue";
 export * from "./SettingValueType";
 export * from "./Tes3mpGameSettingEntry";
 export * from "./RuntimeSource";
+export * from "./PlatformAssets";
+export * from "./RuntimeHint";
 export * from "./RuntimeInspection";
 export * from "./RuntimeHintResolution";
 export * from "./RuntimeMismatch";

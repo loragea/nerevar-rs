@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::reporter::{emit_event, EventSink};
-use crate::runtime::RuntimeSource;
+use crate::runtime::RuntimeHint;
 
 #[derive(Default, Clone)]
 pub struct SyncHostState {
@@ -23,7 +23,7 @@ pub struct SyncHostState {
     /// so a connecting client's runtime picker can preselect it. Snapshotted
     /// at activation (the config is not readable from the request path) and
     /// refreshed by `set_hosting_runtime_hint` when the operator changes it.
-    pub hosting_runtime_hint: Option<RuntimeSource>,
+    pub hosting_runtime_hint: Option<RuntimeHint>,
 }
 
 pub type SharedSyncHost = Arc<Mutex<SyncHostState>>;
@@ -46,7 +46,7 @@ pub fn activate_hosting(
     data_dir: PathBuf,
     instance_root: PathBuf,
     sync_password: String,
-    runtime_hint: Option<RuntimeSource>,
+    runtime_hint: Option<RuntimeHint>,
     sink: Arc<dyn EventSink>,
 ) -> Result<(), String> {
     {
@@ -104,7 +104,7 @@ pub fn deactivate_hosting(
 pub fn set_hosting_runtime_hint(
     sync_host: &SharedSyncHost,
     instance_id: &str,
-    runtime_hint: Option<RuntimeSource>,
+    runtime_hint: Option<RuntimeHint>,
 ) -> Result<bool, String> {
     let mut host = sync_host
         .lock()

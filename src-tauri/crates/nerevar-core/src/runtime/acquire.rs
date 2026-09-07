@@ -14,7 +14,7 @@ use tokio::io::AsyncWriteExt;
 use crate::instance_data::{BackgroundOperationPhase, ProgressEmitter};
 use crate::reporter::EventSink;
 
-use super::github::{fetch_release_by_id, find_asset_by_name, select_tes3mp_asset};
+use super::github::{fetch_release_by_id, select_release_asset};
 use super::inspect::{inspect, RuntimeInfo};
 use super::source::{RuntimeSource, TargetPlatform};
 use super::trust::TrustedRuntimeRepos;
@@ -143,11 +143,7 @@ async fn acquire_github_release(
     );
 
     let release = fetch_release_by_id(repo, release_id).await?;
-    let asset = if asset_name.is_empty() {
-        select_tes3mp_asset(&release, platform)?
-    } else {
-        find_asset_by_name(&release, asset_name)?
-    };
+    let asset = select_release_asset(&release, platform, asset_name)?;
 
     info!(
         "Downloading {} from release {release_id} ({repo}) to {}",
