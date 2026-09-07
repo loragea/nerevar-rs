@@ -1,3 +1,4 @@
+export * from "./AppUpdateAction";
 export * from "./AppUpdateRelease";
 export * from "./AppUpdateStatus";
 export * from "./BackgroundOperationPhase";

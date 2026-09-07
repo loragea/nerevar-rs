@@ -40,6 +40,7 @@ Nerevar is a desktop companion for [TES3MP](https://tes3mp.com/) that keeps ever
 - [For server owners](#for-server-owners)
 - [Headless hosting](#headless-hosting)
 - [For players joining a server](#for-players-joining-a-server)
+- [Installing](#installing)
 - [First-time setup](#first-time-setup)
 - [Dashboard and instances](#dashboard-and-instances)
 - [Mod Organizer 2](#mod-organizer-2)
@@ -118,7 +119,7 @@ server — the same `nerevar-core` code paths the app uses, the same config file
 and manifest format.
 
 ```bash
-cd src-tauri && cargo build --release -p nerevar-host
+sudo apt install ./nerevar-host_<version>_amd64.deb       # or build from source
 nerevar-host --config /etc/nerevar/config.json --check   # what would be hosted?
 nerevar-host --config /etc/nerevar/config.json           # host it
 ```
@@ -147,6 +148,28 @@ Nerevar downloads and runs a TES3MP build, so **which repository that build come
 A server *can* say which TES3MP version it needs, and Nerevar honours that: at every sync it compares the required version with the one installed, offers to install the right one, and holds the launch until you do. If the server also suggests a repository you have not trusted, Nerevar tells you so and downloads nothing from it — it looks for the required version in the repository your instance already uses instead. A server owner running a fork will tell you which repository to add.
 
 When a server suggests a build from a repository you already trust, joining asks you to confirm that one build — its version, the repository it comes from and how much there is to download — instead of showing the runtime picker; **Choose a different runtime** opens the picker if you want it.
+
+---
+
+## Installing
+
+Native packages for every supported platform, on the
+[releases page](https://github.com/loragea/nerevar-rs/releases):
+
+| Platform                    | Download                                |
+| --------------------------- | --------------------------------------- |
+| Debian, Ubuntu, Mint        | `Nerevar_<version>_amd64.deb`           |
+| Fedora, RHEL, openSUSE      | `Nerevar-<version>-1.x86_64.rpm`        |
+| Arch                        | `packaging/arch/nerevar/PKGBUILD`       |
+| Any other Linux             | `Nerevar_<version>_amd64.AppImage`      |
+| Windows 10/11               | `Nerevar_<version>_x64-setup.exe`       |
+
+Per-platform steps, where your settings and instances live, and how updates
+reach you on each of them: **[docs/installing.md](docs/installing.md)**.
+
+Running a dedicated server? The daemon is a package of its own —
+**[docs/headless-hosting.md](docs/headless-hosting.md)**. To build either from
+source instead, see [Building from source](#building-from-source).
 
 ---
 
@@ -202,7 +225,7 @@ The sections below are for contributors, server operators who want deeper contex
 | Multiplayer   | TES3MP (bundled per instance)                      |
 | Engine config | OpenMW / OpenMW cfg generation and launch overlays |
 
-**Repository:** [github.com/kyaustad/nerevar-rs](https://github.com/kyaustad/nerevar-rs)
+**Repository:** [github.com/loragea/nerevar-rs](https://github.com/loragea/nerevar-rs)
 
 ---
 
@@ -287,7 +310,7 @@ Both types use isolated directories under the user’s Nerevar data root so conf
 **Development**
 
 ```bash
-git clone https://github.com/kyaustad/nerevar-rs.git
+git clone https://github.com/loragea/nerevar-rs.git
 cd nerevar-rs
 pnpm install
 pnpm tauri dev

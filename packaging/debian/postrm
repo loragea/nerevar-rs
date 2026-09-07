@@ -1,0 +1,30 @@
+#!/bin/sh
+# On purge, drop /etc/nerevar if the operator never put anything in it. The
+# `nerevar` user and /srv/nerevar are deliberately left alone: the instance
+# trees, mod packages, and world saves under them are the operator's data and
+# are owned by that uid.
+set -e
+
+case "$1" in
+remove)
+	if [ -d /run/systemd/system ]; then
+		systemctl daemon-reload >/dev/null 2>&1 || true
+	fi
+	;;
+
+purge)
+	rmdir /etc/nerevar 2>/dev/null || true
+	if [ -d /run/systemd/system ]; then
+		systemctl daemon-reload >/dev/null 2>&1 || true
+	fi
+	;;
+
+upgrade | failed-upgrade | abort-install | abort-upgrade | disappear) ;;
+
+*)
+	echo "postrm called with unknown argument \`$1'" >&2
+	exit 1
+	;;
+esac
+
+exit 0

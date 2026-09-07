@@ -10,6 +10,7 @@ import {
 import { useAppUpdate } from "@/features/updates/context/update-context-provider";
 import { cn } from "@/lib/utils";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   ArrowDown,
   ArrowLeft,
@@ -67,6 +68,10 @@ export function UpdateAvailablePage() {
   const release = status?.latestRelease;
   const currentVersion = status?.currentVersion ?? "…";
   const nextVersion = release?.version ?? "…";
+  // The backend decides which install story this platform has: Windows
+  // downloads and runs the installer, everywhere else the distro package (or
+  // the AppImage) owns the install and we only point at the release page.
+  const selfInstalls = release?.action === "runInstaller";
 
   const handleInstall = async () => {
     if (!release) return;
@@ -76,6 +81,15 @@ export function UpdateAvailablePage() {
     } catch (error) {
       toast.error(String(error));
       setInstalling(false);
+    }
+  };
+
+  const handleOpenReleasePage = async () => {
+    if (!release) return;
+    try {
+      await openUrl(release.htmlUrl);
+    } catch (error) {
+      toast.error(String(error));
     }
   };
 
@@ -104,9 +118,9 @@ export function UpdateAvailablePage() {
                 </CardTitle>
               </div>
               <CardDescription className="max-w-xl font-serif text-base leading-relaxed text-foreground/75">
-                A newer Nerevar release is ready. Review the notes below, then
-                install the update. Nerevar will download the installer, launch
-                it, and close so you can finish upgrading.
+                {selfInstalls
+                  ? "A newer Nerevar release is ready. Review the notes below, then install the update. Nerevar will download the installer, launch it, and close so you can finish upgrading."
+                  : "A newer Nerevar release is ready. Review the notes below, then update Nerevar the way you installed it — through your package manager, or from the downloads on the release page."}
               </CardDescription>
             </div>
             <Badge
@@ -176,23 +190,48 @@ export function UpdateAvailablePage() {
                     View on GitHub
                   </a>
                 </Button>
-                <Button
-                  variant="launch"
-                  className="min-w-[220px]"
-                  disabled={installing}
-                  onClick={() => void handleInstall()}
-                >
-                  {installing ? (
-                    <Loader2 className="animate-spin" data-icon="inline-start" />
-                  ) : (
-                    <Download data-icon="inline-start" />
-                  )}
-                  {installing ? "Preparing installer…" : "Download and install"}
-                </Button>
+                {selfInstalls ? (
+                  <Button
+                    variant="launch"
+                    className="min-w-[220px]"
+                    disabled={installing}
+                    onClick={() => void handleInstall()}
+                  >
+                    {installing ? (
+                      <Loader2
+                        className="animate-spin"
+                        data-icon="inline-start"
+                      />
+                    ) : (
+                      <Download data-icon="inline-start" />
+                    )}
+                    {installing
+                      ? "Preparing installer…"
+                      : "Download and install"}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="launch"
+                    className="min-w-[220px]"
+                    onClick={() => void handleOpenReleasePage()}
+                  >
+                    <ExternalLink data-icon="inline-start" />
+                    Open the release page
+                  </Button>
+                )}
               </div>
-              <p className="font-serif text-sm text-foreground/60">
-                Installer: <code>{release.installerAssetName}</code>
-              </p>
+              {selfInstalls && release.installerAssetName ? (
+                <p className="font-serif text-sm text-foreground/60">
+                  Installer: <code>{release.installerAssetName}</code>
+                </p>
+              ) : (
+                <p className="font-serif text-sm text-foreground/60">
+                  Installed from a distribution package? Update it there
+                  (<code>apt</code>, <code>dnf</code> or <code>pacman</code>)
+                  rather than from the release page — see{" "}
+                  <code>docs/installing.md</code>.
+                </p>
+              )}
             </>
           )}
         </CardContent>

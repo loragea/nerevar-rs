@@ -12,7 +12,7 @@
 
 [Unit]
 Description=Nerevar headless TES3MP host
-Documentation=https://github.com/kyaustad/nerevar-rs/blob/main/docs/headless-hosting.md
+Documentation=https://github.com/loragea/nerevar-rs/blob/main/docs/headless-hosting.md
 After=network-online.target
 Wants=network-online.target
 

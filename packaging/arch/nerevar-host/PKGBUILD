@@ -1,0 +1,63 @@
+# Maintainer: Nerevar contributors <noreply@github.com>
+#
+# The headless TES3MP host daemon and the command-line Nerevar client, built
+# from the release tarball of a tag on https://github.com/loragea/nerevar-rs.
+# Neither binary depends on Tauri, so this needs no Node toolchain — which is
+# the point on a server.
+#
+# Same contents as the .deb packaging/build-host-deb.sh produces: the two
+# binaries under /usr/bin, a systemd unit that ships disabled, /etc/nerevar
+# for the config, and the operator guide.
+#
+# Bumping this: change pkgver, then `updpkgsums`.
+
+pkgname=nerevar-host
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Headless TES3MP host daemon and command-line Nerevar client"
+arch=('x86_64')
+url="https://github.com/loragea/nerevar-rs"
+license=('GPL-3.0-only')
+depends=('glibc' 'gcc-libs')
+makedepends=('rust' 'cargo')
+backup=()
+install="$pkgname.install"
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+	cd "nerevar-rs-$pkgver/src-tauri"
+	cargo build --release --locked -p nerevar-host -p nerevar-cli
+}
+
+check() {
+	cd "nerevar-rs-$pkgver/src-tauri"
+	cargo test --release --locked -p nerevar-host -p nerevar-cli
+}
+
+package() {
+	cd "nerevar-rs-$pkgver"
+
+	install -Dm755 src-tauri/target/release/nerevar-host \
+		"$pkgdir/usr/bin/nerevar-host"
+	install -Dm755 src-tauri/target/release/nerevar-cli \
+		"$pkgdir/usr/bin/nerevar-cli"
+
+	# The checked-in unit is the from-source example and points at
+	# /usr/local/bin; the package owns /usr/bin. Same rewrite the .deb and
+	# the rpm spec do.
+	sed 's,/usr/local/bin/nerevar-host,/usr/bin/nerevar-host,g' \
+		packaging/systemd/nerevar-host.service \
+		>"$srcdir/nerevar-host.service"
+	install -Dm644 "$srcdir/nerevar-host.service" \
+		"$pkgdir/usr/lib/systemd/system/nerevar-host.service"
+
+	# The daemon looks here when no --config is given and no per-user config
+	# exists. It never creates the file, so the package ships the directory
+	# and nothing in it.
+	install -dm750 "$pkgdir/etc/nerevar"
+
+	install -Dm644 docs/headless-hosting.md \
+		"$pkgdir/usr/share/doc/$pkgname/headless-hosting.md"
+	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

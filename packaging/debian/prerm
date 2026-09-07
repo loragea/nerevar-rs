@@ -1,0 +1,21 @@
+#!/bin/sh
+# Stops the daemon before its binary goes away. Nothing is disabled on an
+# upgrade — systemd restarts the unit from postinst's daemon-reload path.
+set -e
+
+case "$1" in
+remove | deconfigure)
+	if [ -d /run/systemd/system ]; then
+		systemctl stop nerevar-host.service >/dev/null 2>&1 || true
+	fi
+	;;
+
+upgrade | failed-upgrade) ;;
+
+*)
+	echo "prerm called with unknown argument \`$1'" >&2
+	exit 1
+	;;
+esac
+
+exit 0

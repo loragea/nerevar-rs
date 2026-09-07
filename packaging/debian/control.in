@@ -1,0 +1,25 @@
+Package: nerevar-host
+Version: @VERSION@
+Section: games
+Priority: optional
+Architecture: @ARCH@
+Installed-Size: @INSTALLED_SIZE@
+Maintainer: Nerevar contributors <noreply@github.com>
+Homepage: https://github.com/loragea/nerevar-rs
+Depends: libc6, libgcc-s1, adduser
+Recommends: systemd
+Description: Headless TES3MP host daemon and command-line Nerevar client
+ nerevar-host hosts one owned Nerevar instance on a machine with no desktop:
+ it rebuilds the instance's mod manifest, serves it and the mod files to
+ Nerevar clients over HTTP (or HTTPS), and runs the instance's TES3MP
+ dedicated server. It logs to stderr, exits on SIGTERM, and expects a service
+ manager to own it; a systemd unit ships with this package, disabled.
+ .
+ nerevar-cli is the matching command-line client: "nerevar-cli sync" is
+ headless player-side sync for a Linux box with no desktop, and
+ "nerevar-cli admin" drives a headless host's /admin routes as a co-admin
+ over a bearer token.
+ .
+ Operator guide: /usr/share/doc/nerevar-host/headless-hosting.md
+ .
+ This package contains no Morrowind or TES3MP game data.

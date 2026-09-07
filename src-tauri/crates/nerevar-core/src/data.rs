@@ -151,7 +151,11 @@ pub struct NerevarConfig {
 //     }
 // }
 
-#[derive(Clone, Serialize, Deserialize, TS)]
+// `Default` is for tests that need one realistic field out of a GitHub
+// response and do not care about the other eleven (see `app_update`'s asset
+// selection tests); nothing in production constructs these — they are only
+// ever deserialized from the releases API.
+#[derive(Clone, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub struct GithubAssetResponse {
@@ -169,7 +173,7 @@ pub struct GithubAssetResponse {
     pub browser_download_url: String,
 }
 
-#[derive(Serialize, Deserialize, TS)]
+#[derive(Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub struct GithubReleaseResponse {
