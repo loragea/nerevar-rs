@@ -14,7 +14,7 @@
 //! sprinkled through the code, so both arms are testable on either host.
 
 use std::cmp::Ordering;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 // Only the Windows installer path spawns a process (see
 // `spawn_installer_detached`); elsewhere in-app updates are refused outright.
 #[cfg(windows)]
@@ -303,7 +303,7 @@ fn version_compare(left: &str, right: &str) -> Ordering {
 // `path` is Windows-only by construction: the not(windows) arm refuses the
 // operation outright, so a Linux/macOS build sees it as unused.
 #[cfg_attr(not(windows), allow(unused_variables))]
-fn spawn_installer_detached(path: &PathBuf) -> Result<(), String> {
+fn spawn_installer_detached(path: &Path) -> Result<(), String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
