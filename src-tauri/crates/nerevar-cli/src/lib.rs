@@ -6,6 +6,9 @@
 //!   optionally launch the TES3MP client, printing every core event as a JSON
 //!   line. It is what a test rig drives instead of the GUI, and a fallback for
 //!   a Linux user with no desktop.
+//! - [`runtime_check`] is the one-shot question a player on a headless box
+//!   asks before wondering why the client will not start: does this TES3MP
+//!   runtime run here, and if not, which packages are missing.
 //! - [`admin`] is the co-admin side: drive a headless host's `/admin` routes —
 //!   upload a package, edit the load order, apply, restart — with a named
 //!   bearer token. `docs/headless-hosting.md` is the operator guide.
@@ -16,6 +19,7 @@
 
 pub mod admin;
 pub mod cli;
+pub mod runtime_check;
 pub mod sync;
 
 use cli::{Cli, Command};
@@ -24,10 +28,20 @@ use cli::{Cli, Command};
 ///
 /// `sync` keeps the exit codes its rig depends on (0 ok, 1 the manifest did
 /// not validate, 2 error); `admin` is 0 or 1, because a failed admin request
-/// has only the one meaning.
+/// has only the one meaning; `runtime-check` is 0 or 1, 1 meaning the runtime
+/// cannot start here.
 pub async fn run(cli: Cli) -> i32 {
     match cli.command {
         Command::Sync(args) => sync::run_reporting_errors(args).await,
+        Command::RuntimeCheck(args) => {
+            let mut out = std::io::stdout().lock();
+            let code = runtime_check::run(&args.install_dir, &mut out);
+            // Explicit because `main` leaves through `std::process::exit`,
+            // which runs no destructors.
+            use std::io::Write;
+            let _ = out.flush();
+            code
+        }
         Command::Admin(command) => {
             let result = run_admin(&command).await;
             match result {

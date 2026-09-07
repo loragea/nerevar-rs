@@ -15,6 +15,7 @@ use crate::instance_data::{BackgroundOperationPhase, ProgressEmitter};
 use crate::reporter::EventSink;
 
 use super::github::{fetch_release_by_id, find_asset_by_name, select_tes3mp_asset};
+use super::health::{check_runtime_health, RuntimeHealth};
 use super::inspect::{inspect, RuntimeInfo};
 use super::source::{RuntimeSource, TargetPlatform};
 use super::trust::TrustedRuntimeRepos;
@@ -56,6 +57,15 @@ impl Drop for TempDownload {
 /// operation passes its own id so the events land on the banner it is already
 /// showing; anything else passes `None` and core mints one — no instance
 /// exists yet when a runtime is installed, so there is no instance id to use.
+///
+/// Installation ends with a health check (`health::check_runtime_health`): a
+/// Linux tarball whose files all landed can still be unrunnable because the
+/// machine lacks a shared library it links against. A failed check never
+/// fails or rolls back the install — the files are correct, the machine is
+/// what is missing something — but its paragraph goes on the returned
+/// `RuntimeInfo`, into the log, and into the final progress event, so the
+/// desktop's completion banner and the CLI both name the packages to install
+/// instead of leaving the player with "exited immediately" at first launch.
 ///
 /// `trusted` is the player's trusted-repository list, and this is the choke
 /// point that enforces it: every path that puts a runtime on disk — the GUI's
@@ -102,7 +112,7 @@ pub async fn acquire(
         true,
     );
 
-    let info = inspect(dest)?;
+    let mut info = inspect(dest)?;
     for warning in &info.warnings {
         warn!("{warning}");
     }
@@ -111,17 +121,46 @@ pub async fn acquire(
         info.version_display(),
         dest.display()
     );
+
+    // Runs the game binary, so it belongs on a blocking thread rather than in
+    // the async runtime's reactor. A panic in there must not fail an install
+    // that succeeded, so it degrades to "not checked".
+    let checked = dest.to_path_buf();
+    let health = tokio::task::spawn_blocking(move || check_runtime_health(&checked, platform))
+        .await
+        .unwrap_or_else(|error| {
+            RuntimeHealth::not_checked(format!("the health check could not be run: {error}"))
+        });
+    if health.is_failed() {
+        warn!("{}", health.summary());
+    } else {
+        info!("{}", health.summary());
+    }
+
     // The version goes in the message, not just the log: it is the one piece
     // of the inspection a progress consumer (the banner, a rig reading the
-    // event stream) can see without re-inspecting the install.
+    // event stream) can see without re-inspecting the install. A failed
+    // health check rides along in the same place, because that consumer is
+    // exactly who needs to read it.
+    let message = if health.is_failed() {
+        format!(
+            "TES3MP runtime installed (OpenMW {}), but it cannot start on this machine. {}",
+            info.version_display(),
+            health.summary()
+        )
+    } else {
+        format!("TES3MP runtime ready (OpenMW {})", info.version_display())
+    };
     progress.emit(
         BackgroundOperationPhase::InspectingRuntime,
-        format!("TES3MP runtime ready (OpenMW {})", info.version_display()),
+        message,
         1,
         1,
         None,
         true,
     );
+
+    info.health = Some(health);
     Ok(info)
 }
 

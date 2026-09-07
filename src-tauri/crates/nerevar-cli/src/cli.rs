@@ -1,4 +1,5 @@
-//! The command line: `nerevar-cli sync …` and `nerevar-cli admin …`.
+//! The command line: `nerevar-cli sync …`, `nerevar-cli admin …`, and the
+//! one-shot `nerevar-cli runtime-check …`.
 //!
 //! Two surfaces in one binary because they are the same person's two jobs on a
 //! headless machine — pull the host's mod list as a player, push one as a
@@ -28,6 +29,19 @@ pub enum Command {
 
     /// Drive a headless host's `/admin` routes as a co-admin.
     Admin(AdminCommand),
+
+    /// Report whether an installed TES3MP runtime can actually start on this
+    /// machine, naming the packages to install when it cannot. Exits 1 when
+    /// the runtime cannot start.
+    RuntimeCheck(RuntimeCheckArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct RuntimeCheckArgs {
+    /// The runtime directory to check — an instance's `tes3mp/`, or any
+    /// unpacked TES3MP tarball.
+    #[arg(value_name = "INSTALL-DIR")]
+    pub install_dir: PathBuf,
 }
 
 /// Exactly the flags the `sync_client` example took, so a rig switching to
