@@ -25,7 +25,9 @@ Tauri 2 application, three parts:
     API (`github_getters.rs`; official `tes3mp/tes3mp` by default), a
     directory the user already has, or an archive on disk — `acquire`
     installs it *into* the instance's `tes3mp/`, `inspect` reports what
-    landed, `trust` holds the client's trusted-repository list — the only
+    landed, `health` runs the installed Linux client once to see whether the
+    machine has the shared libraries it needs, `trust` holds the client's
+    trusted-repository list — the only
     thing that decides where a build may be downloaded from — and
     `version_lock`/`update` let a host pin the TES3MP *tag* its players need
     while its `runtime_hint`'s repository is honoured only when the player
@@ -56,7 +58,9 @@ Tauri 2 application, three parts:
     does. Two surfaces: `nerevar-cli sync` is headless player-side sync (the
     rig's stand-in for the GUI, and a fallback for a Linux user with no
     desktop), `nerevar-cli admin` drives a headless host's `/admin` routes as
-    a co-admin over a bearer token. Like `nerevar-host` it is `nerevar-core`
+    a co-admin over a bearer token, and `nerevar-cli runtime-check` reports
+    whether an installed TES3MP runtime can start on this machine. Like
+    `nerevar-host` it is `nerevar-core`
     plus clap/reqwest/tokio and no Tauri; unlike the desktop app it decides
     nothing — every rule about what a sync or an apply means stays in core or
     on the host.
@@ -99,6 +103,11 @@ repo root (see below) — not `src-tauri/bindings/`, which no longer exists.
   status` — the co-admin surface for a headless host: `status`, `upload`,
   `remove`, `load-order get|set`, `enable`, `disable`, `order`, `apply`,
   `discard`, `restart`. `docs/headless-hosting.md` is the operator guide.
+- `cargo run -p nerevar-cli -- runtime-check <install-dir>` — runs the Linux
+  library check `runtime::acquire` performs after every install
+  (`crates/nerevar-core/src/runtime/health.rs`) against a runtime directory on
+  its own, printing the missing shared libraries with their Debian/Fedora/Arch
+  package names. Exits 1 when the runtime cannot start.
 
 Rust stable toolchain; frontend uses pnpm (not npm/yarn).
 

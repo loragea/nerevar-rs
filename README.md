@@ -146,6 +146,10 @@ Nerevar downloads and runs a TES3MP build, so **which repository that build come
 
 A server *can* say which TES3MP version it needs, and Nerevar honours that: at every sync it compares the required version with the one installed, offers to install the right one, and holds the launch until you do. If the server also suggests a repository you have not trusted, Nerevar tells you so and downloads nothing from it — it looks for the required version in the repository your instance already uses instead. A server owner running a fork will tell you which repository to add.
 
+### Runtime health check
+
+Every runtime install ends with two checks: that the expected files landed, and — on Linux — that the client actually starts, by running it once with `--version`. A Linux build can have every file in place and still fail to launch because the distribution is missing a shared library it links against, which otherwise shows up much later as a client that exits immediately. When that happens Nerevar names the missing libraries and the package to install for each on Debian/Ubuntu, Fedora and Arch, both after the install and in the launch error itself. A failed check never undoes the install — the files are fine, the machine is missing something. `nerevar-cli runtime-check <install-dir>` runs the same check on its own.
+
 ---
 
 ## First-time setup
