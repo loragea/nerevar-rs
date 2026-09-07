@@ -13,7 +13,7 @@ It is Linux-first (that is where dedicated servers live) and expects a service
 manager to own it: no daemonizing, no PID files, no log files. It logs to
 stderr, exits on SIGTERM, and lets systemd do the rest.
 
-- [Install the binary](#install-the-binary)
+- [Install the package](#install-the-package)
 - [Set up an instance without the GUI](#set-up-an-instance-without-the-gui)
 - [Run it](#run-it)
 - [Co-admins](#co-admins)
@@ -22,19 +22,61 @@ stderr, exits on SIGTERM, and lets systemd do the rest.
 - [Ports](#ports)
 - [Gotchas](#gotchas)
 
-## Install the binary
+## Install the package
 
-From a checkout (Rust stable; no Tauri or Node toolchain needed — the daemon
-does not depend on the GUI crate):
+Every release publishes a Debian package of the daemon and a plain tarball:
+<https://github.com/loragea/nerevar-rs/releases>.
+
+```sh
+sudo apt install ./nerevar-host_<version>_amd64.deb
+```
+
+That gives you:
+
+| Path | What |
+| ---- | ---- |
+| `/usr/bin/nerevar-host` | the daemon |
+| `/usr/bin/nerevar-cli` | the command-line client and co-admin tool |
+| `/lib/systemd/system/nerevar-host.service` | the unit, **installed disabled** |
+| `/etc/nerevar/` | where the daemon looks for `config.json` |
+| `/usr/share/doc/nerevar-host/headless-hosting.md` | this guide |
+
+plus a `nerevar` system user with its home at `/srv/nerevar`, which is where
+the instance layout below assumes the instances live.
+
+Nothing is started. The daemon refuses to invent a config file, so set an
+instance up first ([below](#set-up-an-instance-without-the-gui)) and then
+`systemctl enable --now nerevar-host`.
+
+`nerevar-host --version` should answer straight away.
+
+**Not on a Debian derivative?** Three other routes, same contents:
+
+- **Arch** — `packaging/arch/nerevar-host/PKGBUILD`; `makepkg -si` from that
+  directory.
+- **rpm** — `packaging/rpm/nerevar-host.spec`; `rpmbuild -ba` it against the
+  release tarball. No prebuilt rpm is published.
+- **Tarball** — `nerevar-host-<version>-linux-x86_64.tar.gz` carries both
+  binaries, this guide, and the unit file. Unpack it, put the binaries where
+  you want them, and do the service user and the unit by hand as below.
+
+### From source
+
+The daemon needs the Rust stable toolchain and nothing else — no Tauri, no
+Node, because it does not depend on the GUI crate:
 
 ```sh
 cd src-tauri
-cargo build --release -p nerevar-host
+cargo build --release -p nerevar-host -p nerevar-cli
 sudo install -m 0755 target/release/nerevar-host /usr/local/bin/
+sudo install -m 0755 target/release/nerevar-cli /usr/local/bin/
 ```
 
-`nerevar-host --version` should answer. The binary is self-contained apart from
-the usual system libraries.
+A from-source install owns none of the paths in the table above, so the service
+user, `/etc/nerevar/`, and the systemd unit are yours to create — see
+[Run it under systemd](#run-it-under-systemd). The example unit's `ExecStart`
+points at `/usr/local/bin`, which is where the commands above put the binary;
+the packages rewrite it to `/usr/bin`.
 
 ## Set up an instance without the GUI
 
@@ -657,6 +699,12 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now nerevar-host
 journalctl -u nerevar-host -f
 ```
+
+If you installed [the package](#install-the-package), the unit is already
+there (at `/lib/systemd/system/nerevar-host.service`, with `ExecStart` pointing
+at `/usr/bin`) and only the last two commands apply. Edit it with
+`systemctl edit nerevar-host` rather than in place, so a package upgrade does
+not overwrite your changes.
 
 The daemon's own lines and the TES3MP server's output both land in the journal;
 server output is tagged with the `tes3mp` log target:
