@@ -1,0 +1,57 @@
+# Maintainer: Nerevar contributors <noreply@github.com>
+#
+# The Nerevar desktop app, built from the release tarball of a tag on
+# https://github.com/loragea/nerevar-rs.
+#
+# There is no check(): the workspace test suite is a second full compile of
+# every crate, and this PKGBUILD builds a tagged release that CI already ran
+# it against.
+#
+# Bumping this: change pkgver, then `updpkgsums` (or paste the tarball's
+# sha256 into sha256sums).
+
+pkgname=nerevar
+pkgver=0.2.0
+pkgrel=1
+pkgdesc="Morrowind Multiplayer (TES3MP) instance and mod-sync manager"
+arch=('x86_64')
+url="https://github.com/loragea/nerevar-rs"
+license=('GPL-3.0-only')
+# The app has no tray icon, so no libappindicator here; webkit2gtk-4.1 pulls
+# in the rest of the webview stack, and TLS is rustls inside the binary.
+depends=('webkit2gtk-4.1' 'gtk3')
+makedepends=('rust' 'cargo' 'nodejs' 'pnpm' 'libarchive')
+options=('!lto')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+	cd "nerevar-rs-$pkgver"
+
+	# The Tauri build runs `pnpm build` first (beforeBuildCommand), so the
+	# frontend dependencies have to be there.
+	pnpm install --frozen-lockfile
+
+	# Only the deb: package() unpacks it, so the desktop entry and the
+	# hicolor icons come from Tauri's own bundler instead of being restated
+	# here. Tauri writes the ar/tar archives itself, so this needs no dpkg —
+	# only bsdtar to read them back. Skipping rpm and appimage also skips the
+	# linuxdeploy download the AppImage bundler makes.
+	pnpm tauri build --bundles deb
+}
+
+package() {
+	cd "nerevar-rs-$pkgver"
+
+	local deb
+	deb=$(echo src-tauri/target/release/bundle/deb/*.deb)
+	[ -f "$deb" ] || return 1
+
+	# /usr/bin/nerevar, /usr/share/applications/Nerevar.desktop and
+	# /usr/share/icons/hicolor/*/apps/nerevar.png, straight out of the deb.
+	bsdtar -xOf "$deb" 'data.tar*' | bsdtar -xf - -C "$pkgdir"
+
+	install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+	install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+	install -Dm644 docs/installing.md "$pkgdir/usr/share/doc/$pkgname/installing.md"
+}

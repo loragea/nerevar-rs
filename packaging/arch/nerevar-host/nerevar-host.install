@@ -1,0 +1,37 @@
+# Creates the service account the shipped systemd unit runs as, and its home
+# under /srv/nerevar (where docs/headless-hosting.md puts the instance trees).
+# The unit is never enabled here: an operator has to write
+# /etc/nerevar/config.json and set an instance up before starting anything.
+
+_nerevar_user() {
+	if ! getent group nerevar >/dev/null; then
+		groupadd -r nerevar
+	fi
+	if ! getent passwd nerevar >/dev/null; then
+		useradd -r -g nerevar -d /srv/nerevar -s /usr/bin/nologin \
+			-c "Nerevar headless TES3MP host" nerevar
+	fi
+
+	install -d -o nerevar -g nerevar -m 0755 /srv/nerevar
+	chown root:nerevar /etc/nerevar
+	chmod 0750 /etc/nerevar
+}
+
+post_install() {
+	_nerevar_user
+	cat <<'EOF'
+The nerevar-host service is installed but not enabled. Write
+/etc/nerevar/config.json and set up an instance first — see
+/usr/share/doc/nerevar-host/headless-hosting.md — then:
+
+  systemctl enable --now nerevar-host
+EOF
+}
+
+post_upgrade() {
+	_nerevar_user
+}
+
+# The `nerevar` user and /srv/nerevar are deliberately left in place on
+# removal: the instance trees, mod packages, and world saves under them are
+# the operator's data and are owned by that uid.
