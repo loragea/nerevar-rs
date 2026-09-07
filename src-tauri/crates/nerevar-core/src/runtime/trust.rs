@@ -21,14 +21,19 @@ use crate::data::NerevarConfig;
 
 use super::source::{normalize_repo, RuntimeSource, DEFAULT_TES3MP_REPO};
 
+/// The MundusPatensMP fork's repository, whose releases carry the runtime
+/// the Nerevar fork is built to serve. The slug is the owner's current one
+/// and may move; the tests below pin it so a rename is a deliberate edit.
+pub const MUNDUS_PATENS_REPO: &str = "loragea/munduspatensmp";
+
 /// The repositories every Nerevar install trusts without the player doing
 /// anything.
 ///
-/// Official TES3MP only, for now. A maintainer adding the fork here is
-/// making a distribution-wide statement about it — that is the point of the
-/// list being a constant in the source rather than a value a server, a
-/// config file, or an update can reach.
-pub const BUILTIN_TRUSTED_RUNTIME_REPOS: &[&str] = &[DEFAULT_TES3MP_REPO];
+/// Official TES3MP and the MundusPatensMP fork. A maintainer adding a
+/// repository here is making a distribution-wide statement about it — that
+/// is the point of the list being a constant in the source rather than a
+/// value a server, a config file, or an update can reach.
+pub const BUILTIN_TRUSTED_RUNTIME_REPOS: &[&str] = &[DEFAULT_TES3MP_REPO, MUNDUS_PATENS_REPO];
 
 /// One row of the trusted-source list as a settings screen shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -199,6 +204,14 @@ mod tests {
     }
 
     #[test]
+    fn the_fork_repository_is_trusted_out_of_the_box() {
+        let config = empty_config();
+        assert!(is_trusted_repo(&config, MUNDUS_PATENS_REPO));
+        assert!(is_trusted_repo(&config, "loragea/MundusPatensMP"));
+        assert!(is_trusted_repo(&config, "https://github.com/loragea/MundusPatensMP"));
+    }
+
+    #[test]
     fn an_unknown_repository_is_not_trusted() {
         let config = empty_config();
         assert!(!is_trusted_repo(&config, "attacker/tes3mp"));
@@ -213,21 +226,27 @@ mod tests {
         let listed = trusted_repos(&empty_config());
         assert_eq!(
             listed,
-            vec![TrustedRepo {
-                repo: DEFAULT_TES3MP_REPO.to_string(),
-                builtin: true,
-            }]
+            vec![
+                TrustedRepo {
+                    repo: DEFAULT_TES3MP_REPO.to_string(),
+                    builtin: true,
+                },
+                TrustedRepo {
+                    repo: MUNDUS_PATENS_REPO.to_string(),
+                    builtin: true,
+                },
+            ]
         );
     }
 
     #[test]
     fn adding_a_repository_trusts_it_and_stores_the_normalised_form() {
         let mut config = empty_config();
-        let stored = add_trusted_repo(&mut config, "https://github.com/Victor/MundusPatensMP")
+        let stored = add_trusted_repo(&mut config, "https://github.com/Someone/AnotherFork")
             .expect("a pasted URL is a repository");
-        assert_eq!(stored, "victor/munduspatensmp");
-        assert_eq!(config.trusted_runtime_repos, vec!["victor/munduspatensmp"]);
-        assert!(is_trusted_repo(&config, "Victor/MundusPatensMP"));
+        assert_eq!(stored, "someone/anotherfork");
+        assert_eq!(config.trusted_runtime_repos, vec!["someone/anotherfork"]);
+        assert!(is_trusted_repo(&config, "Someone/AnotherFork"));
         assert_eq!(
             trusted_repos(&config)
                 .into_iter()
@@ -235,7 +254,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 (DEFAULT_TES3MP_REPO.to_string(), true),
-                ("victor/munduspatensmp".to_string(), false),
+                (MUNDUS_PATENS_REPO.to_string(), true),
+                ("someone/anotherfork".to_string(), false),
             ]
         );
     }
@@ -253,7 +273,7 @@ mod tests {
         let mut config = empty_config();
         add_trusted_repo(&mut config, DEFAULT_TES3MP_REPO).unwrap();
         assert!(config.trusted_runtime_repos.is_empty());
-        assert_eq!(trusted_repos(&config).len(), 1);
+        assert_eq!(trusted_repos(&config).len(), BUILTIN_TRUSTED_RUNTIME_REPOS.len());
     }
 
     #[test]

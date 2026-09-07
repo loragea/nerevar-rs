@@ -140,8 +140,9 @@ the daemon advertises it in the manifest summary.
 
 **What a host controls is the version, not where it comes from.** A client
 ships its own list of trusted runtime repositories (the official
-`tes3mp/tes3mp`, plus any a player has added under **Settings → Trusted
-runtime sources**), and a hint may only *select among* those. Hint a
+`tes3mp/tes3mp` and the MundusPatensMP fork `loragea/MundusPatensMP`, plus
+any a player has added under **Settings → Trusted runtime sources**), and a
+hint may only *select among* those. Hint a
 repository the player trusts and their picker preselects it with the release
 you named; hint anything else and the client says your suggestion was not one
 of its trusted sources, preselects the official repository with no release
