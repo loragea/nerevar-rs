@@ -55,7 +55,7 @@ mod bindings {
     };
     use crate::data::{InstanceConfig, NewConnectionConfig};
     use crate::process_manager::types::ProcessRole;
-    use crate::runtime::RuntimeInspection;
+    use crate::runtime::{RuntimeHealth, RuntimeInspection};
     use crate::sync_client::types::{
         ProcessOutputEvent, ProcessStatusEvent, ProcessStream, RemoteManifestSummary,
         SyncPhase, SyncProgressEvent,
@@ -106,5 +106,6 @@ mod bindings {
         SettingCategory::export(&cfg).expect("export SettingCategory");
         Tes3mpGameSettingEntry::export_all(&cfg).expect("export Tes3mpGameSettingEntry");
         RuntimeInspection::export_all(&cfg).expect("export RuntimeInspection");
+        RuntimeHealth::export_all(&cfg).expect("export RuntimeHealth");
     }
 }
