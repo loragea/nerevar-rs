@@ -109,13 +109,19 @@ done
 
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/nerevar-host-deb.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
+# mktemp -d makes it 0700, and dpkg-deb records the staging root as the
+# package's `./` entry — installing that would take /, the filesystem root,
+# down to 0700 with it.
+chmod 0755 "$STAGE"
 
 echo "==> staging nerevar-host $VERSION ($ARCH) in $STAGE"
 
 install -d -m 0755 "$STAGE/DEBIAN"
 install -d -m 0755 "$STAGE/usr/bin"
 install -d -m 0755 "$STAGE/lib/systemd/system"
-install -d -m 0755 "$STAGE/etc/nerevar"
+# 0750 here as well as in postinst, so the mode is right even for someone
+# unpacking the .deb with `dpkg-deb -x` instead of installing it.
+install -d -m 0750 "$STAGE/etc/nerevar"
 install -d -m 0755 "$STAGE/usr/share/doc/nerevar-host"
 
 install -m 0755 "$BIN_DIR/nerevar-host" "$STAGE/usr/bin/nerevar-host"
