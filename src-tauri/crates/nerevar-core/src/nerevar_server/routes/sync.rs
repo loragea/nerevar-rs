@@ -14,7 +14,7 @@ use tokio_util::io::ReaderStream;
 use crate::instance_data::{load_manifest, manifest_path};
 use crate::instance_setup::{instance_tes3mp_dir, read_tes3mp_server_settings};
 use crate::nerevar_server::state::ServerContext;
-use crate::runtime::RuntimeSource;
+use crate::runtime::RuntimeHint;
 use crate::sync_auth::{sync_password_matches, SYNC_PASSWORD_HEADER};
 use crate::sync_host::get_package_file_path;
 use crate::sync_paths::normalize_manifest_file_path;
@@ -35,7 +35,7 @@ pub(super) struct ManifestSummary {
     /// entirely otherwise, which is also what a host older than the field
     /// sends — a client reads both as "no suggestion".
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub runtime_hint: Option<RuntimeSource>,
+    pub runtime_hint: Option<RuntimeHint>,
 }
 
 impl ManifestSummary {
@@ -43,7 +43,7 @@ impl ManifestSummary {
     pub(super) fn of(
         manifest: &crate::instance_data::NerevarManifest,
         password_required: bool,
-        runtime_hint: Option<RuntimeSource>,
+        runtime_hint: Option<RuntimeHint>,
     ) -> Self {
         let packages: Vec<ManifestPackageSummary> = manifest
             .packages
@@ -191,7 +191,7 @@ pub(super) fn password_required(state: &ServerContext) -> Result<bool, (StatusCo
 /// read).
 pub(super) fn hosting_runtime_hint(
     state: &ServerContext,
-) -> Result<Option<RuntimeSource>, (StatusCode, String)> {
+) -> Result<Option<RuntimeHint>, (StatusCode, String)> {
     let host = state.sync_host.lock().map_err(|_| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,

@@ -66,9 +66,32 @@ fn describe_assets(assets: &[GithubAssetResponse]) -> String {
     format!("Assets in this release: {}", names.join(", "))
 }
 
+/// The asset `platform` should download from `release`: the one `asset_name`
+/// pins, or — when it is empty — the one the naming rules pick.
+///
+/// The single place that answers "which file of this release is the runtime",
+/// so the installer and anything that only wants to *show* the download (its
+/// name, its size) cannot disagree about it.
+pub fn select_release_asset<'a>(
+    release: &'a GithubReleaseResponse,
+    platform: TargetPlatform,
+    asset_name: &str,
+) -> Result<&'a GithubAssetResponse, String> {
+    if asset_name.trim().is_empty() {
+        select_tes3mp_asset(release, platform)
+    } else {
+        find_asset_by_name(release, asset_name.trim())
+    }
+}
+
 /// Looks up an asset by its exact file name — the path taken when a caller
-/// pinned `RuntimeSource::GithubRelease::asset_name` instead of leaving the
-/// choice to `select_tes3mp_asset`.
+/// pinned `RuntimeSource::GithubRelease::asset_name`, or a host named one for
+/// this platform in its hint, instead of leaving the choice to
+/// `select_tes3mp_asset`.
+///
+/// The error names both the asset that was asked for and the release that did
+/// not hold it, plus what it did hold: a host that mistyped one file name in
+/// its hint is the case this is read in.
 pub fn find_asset_by_name<'a>(
     release: &'a GithubReleaseResponse,
     asset_name: &str,
@@ -77,7 +100,22 @@ pub fn find_asset_by_name<'a>(
         .assets
         .iter()
         .find(|asset| asset.name == asset_name)
-        .ok_or_else(|| format!("Release {} has no asset named {asset_name}", release.id))
+        .ok_or_else(|| {
+            format!(
+                "Release {} has no asset named {asset_name}. {}",
+                describe_release(release),
+                describe_assets(&release.assets)
+            )
+        })
+}
+
+/// How an error names a release: its tag when it has one, its id either way.
+fn describe_release(release: &GithubReleaseResponse) -> String {
+    if release.tag_name.trim().is_empty() {
+        release.id.to_string()
+    } else {
+        format!("{} ({})", release.tag_name, release.id)
+    }
 }
 
 /// Selection rule for Windows: the Win64 zip asset.
@@ -372,5 +410,47 @@ mod tests {
             .err()
             .unwrap()
             .contains("has no asset named nope.zip"));
+    }
+
+    /// A hint naming an asset that is not in the release: the error has to
+    /// name both, since the operator who wrote the name reads it second-hand.
+    #[test]
+    fn a_missing_named_asset_names_the_asset_and_the_release() {
+        let mut release = release_081();
+        release.tag_name = "tes3mp-0.8.1".to_string();
+
+        let error = select_release_asset(&release, TargetPlatform::Linux, "not-there.tar.gz")
+            .err()
+            .expect("the release has no such asset");
+        assert!(
+            error.contains("Release tes3mp-0.8.1 (123) has no asset named not-there.tar.gz"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            error.contains("Assets in this release: "),
+            "unexpected error: {error}"
+        );
+    }
+
+    /// The two halves of the selection rule, in one place: a named asset is
+    /// taken as named, an empty name falls back to the platform convention.
+    #[test]
+    fn select_release_asset_prefers_the_named_asset_over_the_rule() {
+        let release = release_081();
+
+        let named = select_release_asset(
+            &release,
+            TargetPlatform::Linux,
+            "  tes3mp.Win64.release.0.8.1.zip  ",
+        )
+        .expect("a named asset is taken as named, trimmed");
+        assert_eq!(named.name, "tes3mp.Win64.release.0.8.1.zip");
+
+        let by_rule = select_release_asset(&release, TargetPlatform::Linux, "")
+            .expect("an empty name leaves it to the rules");
+        assert_eq!(
+            by_rule.name,
+            "tes3mp-GNU+Linux-x86_64-release-0.8.1-68954091c5-6da3fdea59.tar.gz"
+        );
     }
 }

@@ -5,7 +5,7 @@ use nerevar_core::instance_data::{
     load_load_order, load_manifest, load_order_path, manifest_path, resolve_package_data_dir,
 };
 use nerevar_core::instance_setup::instance_tes3mp_dir;
-use nerevar_core::runtime::{inspect, normalize_runtime_hint, RuntimeSource};
+use nerevar_core::runtime::{inspect, normalize_runtime_hint, RuntimeHint, RuntimeSource};
 
 use crate::config::ResolvedConfig;
 use crate::tls::TlsSettings;
@@ -65,9 +65,21 @@ pub fn run_check(
         Err(err) => println!("  tes3mp runtime: {err}"),
     }
     match instance.runtime_hint.clone().map(normalize_runtime_hint) {
-        Some(Ok(RuntimeSource::GithubRelease { repo, tag, .. })) => {
+        Some(Ok(RuntimeHint {
+            source: RuntimeSource::GithubRelease { repo, tag, .. },
+            platform_assets,
+        })) => {
             let tag = if tag.is_empty() { "(no tag)" } else { &tag };
             println!("  runtime hint:   suggests {repo} {tag} to players");
+            for (platform, asset) in [
+                ("windows", platform_assets.windows.as_deref()),
+                ("linux", platform_assets.linux.as_deref()),
+                ("macos", platform_assets.macos.as_deref()),
+            ] {
+                if let Some(asset) = asset {
+                    println!("  runtime asset:  {platform} players download {asset}");
+                }
+            }
         }
         // `normalize_runtime_hint` only ever returns a `GithubRelease`.
         Some(Ok(_)) => unreachable!("a normalized hint is always a github release"),

@@ -3,7 +3,13 @@
 /**
  * What a host's runtime suggestion means for this client's picker.
  */
-export type RuntimeHintResolution = { "status": "noHint" } | { "status": "trusted", repo: string, tag: string, releaseId: string, } | { "status": "untrusted", 
+export type RuntimeHintResolution = { "status": "noHint" } | { "status": "trusted", repo: string, tag: string, releaseId: string, 
+/**
+ * The asset file name the host named for *this* platform, empty
+ * when it named none — in which case the naming rules in
+ * `runtime::select_tes3mp_asset` pick the asset, as they always did.
+ */
+assetName: string, } | { "status": "untrusted", 
 /**
  * What the host named, for the message and nothing else.
  */

@@ -6,7 +6,7 @@ use crate::data::{InstanceConnectionSettings, InstanceEditPayload};
 use crate::reporter::{EventSink, TauriEventSink};
 use crate::sync_host::SharedSyncHost;
 use crate::AppState;
-use nerevar_core::runtime::RuntimeSource;
+use nerevar_core::runtime::RuntimeHint;
 
 /// Command residue after the Tauri/core split (see AGENTS.md,
 /// "Architecture"): logic moved into
@@ -43,8 +43,8 @@ pub fn set_instance_runtime_hint(
     state: State<'_, Mutex<AppState>>,
     sync_host: State<'_, SharedSyncHost>,
     instance_id: String,
-    hint: Option<RuntimeSource>,
-) -> Result<Option<RuntimeSource>, String> {
+    hint: Option<RuntimeHint>,
+) -> Result<Option<RuntimeHint>, String> {
     let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app));
     nerevar_core::connection::instance_edit::set_instance_runtime_hint(
         state.inner(),

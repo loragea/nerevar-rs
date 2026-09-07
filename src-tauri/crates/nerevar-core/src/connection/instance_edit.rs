@@ -10,7 +10,7 @@ use crate::instance_setup::{
     write_tes3mp_client_connection,
 };
 use crate::reporter::{emit_event, EventSink};
-use crate::runtime::{normalize_runtime_hint, RuntimeSource};
+use crate::runtime::{normalize_runtime_hint, RuntimeHint};
 use crate::sync_client::game_host;
 use crate::sync_host::{set_hosting_runtime_hint, SharedSyncHost};
 use crate::AppState;
@@ -145,8 +145,8 @@ pub fn set_instance_runtime_hint(
     sync_host: &SharedSyncHost,
     sink: Arc<dyn EventSink>,
     instance_id: String,
-    hint: Option<RuntimeSource>,
-) -> Result<Option<RuntimeSource>, String> {
+    hint: Option<RuntimeHint>,
+) -> Result<Option<RuntimeHint>, String> {
     let hint = hint.map(normalize_runtime_hint).transpose()?;
 
     let mut instance = {

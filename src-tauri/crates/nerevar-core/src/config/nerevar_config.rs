@@ -643,7 +643,7 @@ pub async fn generate_default_global_openmw_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::DEFAULT_TES3MP_REPO;
+    use crate::runtime::{RuntimeHint, DEFAULT_TES3MP_REPO};
 
     struct Scratch(PathBuf);
 
@@ -819,12 +819,12 @@ mod tests {
             "a config written before the field must load as no suggestion"
         );
 
-        let hint = RuntimeSource::GithubRelease {
+        let hint = RuntimeHint::from_source(RuntimeSource::GithubRelease {
             repo: "owner/name".to_string(),
             release_id: "999".to_string(),
             tag: "v1.2.3".to_string(),
             asset_name: String::new(),
-        };
+        });
         config.owned_instances.as_mut().unwrap()[0].runtime_hint = Some(hint.clone());
         std::fs::write(&path, serde_json::to_string_pretty(&config).unwrap()).unwrap();
 

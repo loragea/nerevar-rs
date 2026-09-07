@@ -76,7 +76,9 @@ pub fn resolve_and_load_config(explicit: Option<&Path>) -> Result<ResolvedConfig
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nerevar_core::runtime::{RuntimeSource, DEFAULT_TES3MP_REPO};
+    use nerevar_core::runtime::{
+        normalize_runtime_hint, RuntimeHint, RuntimeSource, TargetPlatform, DEFAULT_TES3MP_REPO,
+    };
 
     struct Scratch(PathBuf);
 
@@ -212,12 +214,12 @@ mod tests {
         let owned = resolved.config.owned_instances.expect("owned instances");
         assert_eq!(
             owned[0].runtime_hint,
-            Some(RuntimeSource::GithubRelease {
+            Some(RuntimeHint::from_source(RuntimeSource::GithubRelease {
                 repo: "owner/name".to_string(),
                 release_id: String::new(),
                 tag: "0.8.1".to_string(),
                 asset_name: String::new(),
-            })
+            }))
         );
         // The hint is a suggestion for players and never the host's own
         // runtime: the legacy migration still governs `runtime`.
@@ -229,6 +231,64 @@ mod tests {
                 tag: String::new(),
                 asset_name: String::new(),
             })
+        );
+    }
+
+    /// The documented `platformAssets` shape (docs/headless-hosting.md) loads
+    /// with the names attached, so a fork whose release files are named its
+    /// own way can point its players at the right one.
+    #[test]
+    fn a_hand_added_platform_asset_map_loads_with_the_hint() {
+        let scratch = scratch("platform-assets");
+        let path = scratch.0.join("config.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "onboardingComplete": true,
+              "ownedInstances": [
+                {
+                  "id": "host-1",
+                  "name": "Host",
+                  "description": "",
+                  "path": "/instances/host",
+                  "dataDir": "/instances/host/data",
+                  "runtimeHint": {
+                    "kind": "githubRelease",
+                    "repo": "owner/name",
+                    "releaseId": "",
+                    "tag": "0.8.1",
+                    "platformAssets": {
+                      "windows": "mymp.Win64.release.0.8.1.zip",
+                      "linux": "mymp-GNU+Linux-x86_64-release-0.8.1.tar.gz"
+                    }
+                  }
+                }
+              ],
+              "syncedInstances": null,
+              "rootPath": "/instances",
+              "syncPort": 25567
+            }"#,
+        )
+        .unwrap();
+
+        let resolved = resolve_and_load_config(Some(&path)).expect("config should load");
+        let owned = resolved.config.owned_instances.expect("owned instances");
+        let hint = owned[0].runtime_hint.clone().expect("a hint");
+        assert_eq!(
+            hint.platform_assets.get(TargetPlatform::Windows),
+            Some("mymp.Win64.release.0.8.1.zip")
+        );
+        assert_eq!(
+            hint.platform_assets.get(TargetPlatform::Linux),
+            Some("mymp-GNU+Linux-x86_64-release-0.8.1.tar.gz")
+        );
+        assert_eq!(hint.platform_assets.get(TargetPlatform::MacOs), None);
+
+        // And it survives the normalisation the daemon runs before advertising.
+        let normalized = normalize_runtime_hint(hint).expect("a usable hint");
+        assert_eq!(
+            normalized.platform_assets.get(TargetPlatform::Windows),
+            Some("mymp.Win64.release.0.8.1.zip")
         );
     }
 }
