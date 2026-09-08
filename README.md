@@ -149,6 +149,10 @@ A server *can* say which TES3MP version it needs, and Nerevar honours that: at e
 
 When a server suggests a build from a repository you already trust, joining asks you to confirm that one build — its version, the repository it comes from and how much there is to download — instead of showing the runtime picker; **Choose a different runtime** opens the picker if you want it.
 
+### Runtime health check
+
+Every runtime install ends with two checks: that the expected files landed, and — on Linux — that the client actually starts, by running it once with `--version`. A Linux build can have every file in place and still fail to launch because the distribution is missing a shared library it links against, which otherwise shows up much later as a client that exits immediately. When that happens Nerevar names the missing libraries and the package to install for each on Debian/Ubuntu, Fedora and Arch, both after the install and in the launch error itself. A failed check never undoes the install — the files are fine, the machine is missing something. `nerevar-cli runtime-check <install-dir>` runs the same check on its own.
+
 ---
 
 ## Installing

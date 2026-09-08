@@ -12,6 +12,7 @@ use crate::instance_data::{
 use crate::instance_setup::{instance_tes3mp_dir, write_required_data_files_for_resolved};
 use crate::openmw_ini_importer::begin_global_openmw_launch;
 use crate::reporter::{emit_event, EventSink};
+use crate::runtime::TargetPlatform;
 use crate::sync_client::types::{ProcessOutputEvent, ProcessStatusEvent, ProcessStream};
 
 use super::state::{spawn_exit_watcher, ProcessManager};
@@ -105,6 +106,24 @@ pub fn find_executable(root: &Path, names: &[&str], max_depth: u32) -> Option<Pa
     }
 
     None
+}
+
+/// The health check's paragraph, when it can explain why a client died on
+/// the spot.
+///
+/// A runtime Nerevar installed was checked at install time, but a player who
+/// dropped a Linux tarball in themselves — or who uninstalled a system
+/// package since — gets no warning until this moment, and "exited
+/// immediately (code 127)" tells them nothing. Only a `Failed` verdict is
+/// worth appending: `NotChecked` adds noise, and `Healthy` means the crash
+/// had some other cause and the launch error should not misdirect.
+///
+/// The check runs the client once more, which is affordable here because
+/// this is already the error path and the client already proved it exits
+/// straight away.
+fn missing_library_diagnosis(tes3mp_dir: &Path) -> Option<String> {
+    let health = crate::runtime::check_runtime_health(tes3mp_dir, TargetPlatform::current());
+    health.is_failed().then(|| health.summary())
 }
 
 fn pipe_process_output(
@@ -210,10 +229,15 @@ pub fn launch_tes3mp_client(
     thread::sleep(Duration::from_millis(900));
     if let Ok(Some(status)) = child.try_wait() {
         manager.restore_global_openmw_session_if_any();
-        return Err(format!(
+        let mut message = format!(
             "TES3MP client exited immediately (code {:?}). Check the client output console below.",
             status.code()
-        ));
+        );
+        if let Some(diagnosis) = missing_library_diagnosis(&tes3mp_dir) {
+            message.push(' ');
+            message.push_str(&diagnosis);
+        }
+        return Err(message);
     }
 
     emit_event(

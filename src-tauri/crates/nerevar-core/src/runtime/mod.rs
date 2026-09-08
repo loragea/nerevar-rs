@@ -6,6 +6,11 @@
 //! (a GitHub release, a directory the user already has, an archive on disk),
 //! `acquire` puts it on disk, and `inspect` reports what actually landed.
 //!
+//! `health` answers the question `inspect` cannot: a Linux tarball whose
+//! files are all present still cannot start if the machine is missing a
+//! shared library it links against, so every install ends by running the
+//! client once and naming what the loader could not find.
+//!
 //! Two of those pieces answer to the version lock: `trust` decides which
 //! GitHub repositories may be downloaded from at all (the client's list, never
 //! a server's), and `version_lock` decides what a host's advertised runtime may
@@ -13,6 +18,7 @@
 
 pub mod acquire;
 pub mod github;
+pub mod health;
 pub mod inspect;
 pub mod source;
 pub mod trust;
@@ -21,6 +27,9 @@ pub mod version_lock;
 
 pub use acquire::acquire;
 pub use github::{find_asset_by_name, select_release_asset, select_tes3mp_asset};
+pub use health::{
+    check_runtime_health, MissingLibrary, RuntimeHealth, RuntimeHealthStatus,
+};
 pub use inspect::{inspect, inspect_archive, inspect_source, RuntimeInfo, RuntimeInspection};
 pub use source::{
     normalize_repo, normalize_runtime_hint, PlatformAssets, RuntimeHint, RuntimeSource,

@@ -193,6 +193,14 @@ async fn install_runtime(
     )
     .await?;
     info.require_complete()?;
+
+    // `acquire` already put this on the event stream, but stdout here is a
+    // JSON-lines feed a rig parses — a player watching the terminal reads
+    // stderr. The paragraph names the packages to install, which is the one
+    // thing they cannot work out from "the client exits immediately".
+    if let Some(health) = &info.health {
+        eprintln!("{}", health.summary());
+    }
     Ok(())
 }
 

@@ -19,6 +19,7 @@ use crate::instance_setup::{
 use crate::process_manager::spawn::{find_executable, CLIENT_EXE_NAMES, SERVER_EXE_NAMES};
 
 use super::acquire::{detect_archive_format, ArchiveFormat};
+use super::health::RuntimeHealth;
 use super::source::RuntimeSource;
 
 /// How deep under the runtime root the pieces are searched for. The same
@@ -41,6 +42,11 @@ pub struct RuntimeInfo {
     /// Non-fatal observations: an unknown engine version, a runtime with only
     /// one of the two executables.
     pub warnings: Vec<String>,
+    /// Whether the installed runtime actually starts on this machine, when
+    /// something has asked. `None` means nobody ran the check — inspection
+    /// only looks at files, and a runtime source that is not installed yet
+    /// has nothing to run. `acquire` fills it in after every install.
+    pub health: Option<RuntimeHealth>,
 }
 
 impl RuntimeInfo {
@@ -96,6 +102,7 @@ impl RuntimeInfo {
             has_server_exe: self.server_exe.is_some(),
             missing: self.missing_required(),
             warnings: self.warnings.clone(),
+            health: self.health.clone(),
         }
     }
 }
@@ -121,6 +128,9 @@ pub struct RuntimeInspection {
     /// Non-fatal observations — a server-only build, an unknown engine
     /// version.
     pub warnings: Vec<String>,
+    /// Whether the runtime starts on this machine. `null` for a source being
+    /// inspected before install: there is nothing to run yet.
+    pub health: Option<RuntimeHealth>,
 }
 
 /// Locates the pieces of the TES3MP runtime installed under `dir`.
@@ -156,6 +166,7 @@ pub fn inspect(dir: &Path) -> Result<RuntimeInfo, String> {
         server_data_dir,
         openmw_version,
         warnings,
+        health: None,
     })
 }
 
@@ -278,6 +289,8 @@ impl ArchiveScan {
             server_data_dir: self.server_data_dir,
             openmw_version: self.openmw_version,
             warnings,
+            // An archive is not installed, so there is nothing to run.
+            health: None,
         }
     }
 }
