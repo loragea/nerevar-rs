@@ -51,6 +51,14 @@ type InspectionState =
  * repository's releases. The two local branches add a path field, a native
  * picker, and an inline inspection of what was picked.
  *
+ * The path may be typed as well as browsed to. The native picker is the only
+ * way in for most people, but it is not always there to open: rfd reaches it
+ * through the desktop portal and falls back to zenity, and a Linux desktop
+ * with neither leaves the picker returning nothing at all — a read-only field
+ * would then make a local runtime unreachable. Whatever lands in the field is
+ * inspected the same way either way, so a typo is reported rather than
+ * trusted.
+ *
  * `onBlockingChange` reports whether the current pick would fail the create:
  * a local source whose inspection lists missing pieces is not a TES3MP
  * runtime, and the backend would reject it after the copy — and a GitHub
@@ -217,14 +225,25 @@ export function RuntimeSourceField({
           </p>
           <div className="flex gap-2">
             <Input
-              readOnly
               value={path}
+              spellCheck={false}
+              autoCapitalize="none"
+              autoCorrect="off"
+              disabled={disabled}
+              aria-label={
+                value.kind === "localDirectory"
+                  ? "TES3MP install directory"
+                  : "TES3MP release archive"
+              }
               placeholder={
                 value.kind === "localDirectory"
                   ? "No folder selected"
                   : "No archive selected"
               }
               className="bg-input/40 font-mono text-xs"
+              onChange={(event) =>
+                onValueChange({ kind: value.kind, path: event.target.value })
+              }
             />
             <Button
               type="button"
