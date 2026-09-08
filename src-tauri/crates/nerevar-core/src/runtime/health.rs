@@ -27,6 +27,23 @@
 //! perfectly good runtime on a server as broken. Newer builds (the
 //! MundusPatensMP 0.51 fork) do not need it but are unharmed by it.
 //!
+//! A probe must leave no trace in the player's profile. Starting the client
+//! is not a read-only act: the wrapper scripts seed a config directory and
+//! the engine writes `shaders.yaml` on its way to printing a version. So the
+//! probe runs under a throwaway profile — `HOME`, `XDG_CONFIG_HOME`,
+//! `XDG_DATA_HOME` and `XDG_CACHE_HOME` all point into a temporary directory
+//! that is deleted when the probe returns. A wrapper that honours the
+//! environment (the official 0.8.1 tarball's `tes3mp` + `tes3mp-prelaunch`)
+//! therefore writes into that directory and nowhere else.
+//!
+//! A wrapper that *forces* its own XDG roots still seeds its own in-install
+//! profile: MundusPatensMP's `tes3mp` exports
+//! `XDG_CONFIG_HOME=<install>/userprofile/config` before exec'ing the engine,
+//! so a probe leaves an empty `openmw.cfg` and a `shaders.yaml` under the
+//! install it just checked. That is the wrapper's behaviour, not Nerevar's,
+//! and it is fixed in the wrapper by honouring a pre-set `XDG_CONFIG_HOME`;
+//! nothing this module can set will prevent it.
+//!
 //! Only Linux is checked. Windows and macOS report [`RuntimeHealthStatus::NotChecked`]:
 //! neither platform has the bundled-tarball-versus-system-libraries problem
 //! this exists for, and neither has `ldd`.
@@ -475,25 +492,81 @@ impl ProbeOutput {
     }
 }
 
+/// A throwaway profile for one probe run, deleted when the guard drops.
+///
+/// Starting the client writes: the wrappers seed a config directory and the
+/// engine drops a `shaders.yaml`. None of that may land in the player's real
+/// profile just because a runtime was installed, so every probe gets its own
+/// `HOME` and XDG roots here and they go away with it.
+///
+/// `tempfile` is not a dependency of this crate, and a health check is not a
+/// reason to add one: a name built from the pid, a per-process counter and
+/// the clock is unique enough for a directory nothing else is told about.
+#[cfg(unix)]
+struct ProbeProfile {
+    root: PathBuf,
+}
+
+#[cfg(unix)]
+impl ProbeProfile {
+    fn create() -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_nanos())
+            .unwrap_or(0);
+        let root = std::env::temp_dir().join(format!(
+            "nerevar-runtime-probe-{}-{}-{nanos}",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed),
+        ));
+        // Best effort. A wrapper that cannot find the directory creates it
+        // (`mkdir -p`) or falls back to the package directory, and the drop
+        // below removes whatever ended up there either way — so a temp
+        // directory that cannot be created is not a reason to fail a check.
+        let _ = std::fs::create_dir_all(&root);
+        Self { root }
+    }
+
+    fn path(&self) -> &Path {
+        &self.root
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ProbeProfile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
 /// The environment every probe runs under: enough to work, nothing that ties
-/// the answer to the session that happens to be logged in.
+/// the answer to — or leaves anything behind in — the session that happens to
+/// be logged in.
 ///
 /// No `DISPLAY` or `WAYLAND_DISPLAY`, so a developer's desktop and a
 /// dedicated server produce the same verdict and no window ever flashes up.
 /// `SDL_VIDEODRIVER`/`SDL_AUDIODRIVER=dummy` because OpenMW 0.47-era builds
 /// bring SDL up before printing `--version` and abort without a video device.
-/// `HOME` is forwarded when set: the official tarball's `tes3mp-prelaunch`
-/// looks for `$HOME/.config/openmw` and would otherwise write to `/.config`.
+/// `HOME` and the three XDG roots point at `profile` rather than the player's
+/// own: the official tarball's `tes3mp-prelaunch` reads `$HOME/.config/openmw`
+/// and the engine writes its config directory, and neither may touch a real
+/// profile during an install (see the module doc for the fork wrapper, which
+/// overrides these and seeds its own in-install profile regardless).
 #[cfg(unix)]
-fn configure_probe_env(command: &mut Command) {
+fn configure_probe_env(command: &mut Command, profile: &ProbeProfile) {
     command.env_clear();
     command.env(
         "PATH",
         std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".to_string()),
     );
-    if let Ok(home) = std::env::var("HOME") {
-        command.env("HOME", home);
-    }
+    let root = profile.path();
+    command.env("HOME", root);
+    command.env("XDG_CONFIG_HOME", root.join("config"));
+    command.env("XDG_DATA_HOME", root.join("data"));
+    command.env("XDG_CACHE_HOME", root.join("cache"));
     command.env("SDL_VIDEODRIVER", "dummy");
     command.env("SDL_AUDIODRIVER", "dummy");
     command.env("LC_ALL", "C");
@@ -501,12 +574,15 @@ fn configure_probe_env(command: &mut Command) {
 
 #[cfg(unix)]
 fn run_version_probe(exe: &Path) -> Result<ProbeOutput, String> {
+    // Held until the run finishes, then dropped — which removes the tree the
+    // client just wrote into.
+    let profile = ProbeProfile::create();
     let mut command = Command::new(exe);
     command.arg("--version");
     if let Some(parent) = exe.parent() {
         command.current_dir(parent);
     }
-    configure_probe_env(&mut command);
+    configure_probe_env(&mut command, &profile);
     run_captured(command, PROBE_TIMEOUT).map_err(|error| {
         format!("the client could not be started at all ({error}), so it cannot run here")
     })
@@ -514,12 +590,13 @@ fn run_version_probe(exe: &Path) -> Result<ProbeOutput, String> {
 
 #[cfg(unix)]
 fn run_ldd(elf: &Path, library_dir: Option<&Path>) -> Result<String, String> {
+    let profile = ProbeProfile::create();
     let mut command = Command::new("ldd");
     command.arg(elf);
     if let Some(parent) = elf.parent() {
         command.current_dir(parent);
     }
-    configure_probe_env(&mut command);
+    configure_probe_env(&mut command, &profile);
     if let Some(dir) = library_dir {
         command.env("LD_LIBRARY_PATH", dir);
     }
@@ -1385,6 +1462,119 @@ mod tests {
             fs::write(dir.join("tes3mp.x86_64"), b"not really an elf").unwrap();
         }
 
+        /// Runs the real check, retrying the one failure that is an artefact
+        /// of a test process executing scripts it wrote itself.
+        ///
+        /// These tests write a wrapper and immediately exec it. A sibling
+        /// test thread that forks in between hands its child a duplicate of
+        /// the still-open write fd, and the exec then fails with ETXTBSY
+        /// ("Text file busy") until that child reaches its own exec. Nothing
+        /// a real install can hit — a runtime is unpacked and closed long
+        /// before it is probed — so it is retried rather than asserted on.
+        fn probe_until_not_busy(dir: &Path) -> RuntimeHealth {
+            for _ in 0..50 {
+                let health = check_runtime_health(dir, TargetPlatform::Linux);
+                if !health
+                    .reason
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("Text file busy")
+                {
+                    return health;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            panic!("the fake wrapper at {} stayed busy", dir.display());
+        }
+
+        /// A wrapper that does what a real one does — write into the profile
+        /// it was handed — and records the profile it was handed beside
+        /// itself, where the test can still read it once the profile is gone.
+        const RECORDING_WRAPPER: &str = "#!/bin/sh\n\
+             mkdir -p \"$XDG_CONFIG_HOME\"\n\
+             : > \"$XDG_CONFIG_HOME/marker\"\n\
+             { echo \"HOME=$HOME\"\n\
+               echo \"XDG_CONFIG_HOME=$XDG_CONFIG_HOME\"\n\
+               echo \"XDG_DATA_HOME=$XDG_DATA_HOME\"\n\
+               echo \"XDG_CACHE_HOME=$XDG_CACHE_HOME\"; } > ./probe-env\n\
+             echo \"HOME=$HOME\"\n\
+             echo 'OpenMW version 0.47.0'\n\
+             exit 0\n";
+
+        /// Reads the `probe-env` the recording wrapper left behind.
+        fn recorded_env(dir: &Path) -> std::collections::HashMap<String, String> {
+            let text = fs::read_to_string(dir.join("probe-env")).expect("wrapper recorded its env");
+            text.lines()
+                .filter_map(|line| line.split_once('='))
+                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .collect()
+        }
+
+        /// The player's profile is not a scratch directory for an install:
+        /// the probe runs under its own `HOME` and XDG roots, so everything a
+        /// wrapper or the engine writes on the way to `--version` lands there.
+        #[test]
+        fn a_probe_never_writes_into_the_callers_profile() {
+            let dir = scratch("throwaway-profile");
+            fake_runtime(dir.path(), RECORDING_WRAPPER);
+
+            let health = probe_until_not_busy(dir.path());
+            assert_eq!(health.status, RuntimeHealthStatus::Healthy, "{health:?}");
+
+            let seen = recorded_env(dir.path());
+            let home = seen.get("HOME").expect("the probe had a HOME");
+            let caller_home = std::env::var("HOME").unwrap_or_default();
+            assert_ne!(home, &caller_home, "the probe ran under the caller's HOME");
+            assert!(
+                Path::new(home).starts_with(std::env::temp_dir()),
+                "the probe's HOME {home} is not a temporary directory"
+            );
+            for (key, leaf) in [
+                ("XDG_CONFIG_HOME", "config"),
+                ("XDG_DATA_HOME", "data"),
+                ("XDG_CACHE_HOME", "cache"),
+            ] {
+                let value = seen.get(key).unwrap_or_else(|| panic!("{key} was not set"));
+                assert_eq!(Path::new(value), Path::new(home).join(leaf), "{key}");
+            }
+
+            // The marker the wrapper wrote went into the throwaway profile,
+            // not into either place the caller's own config could live.
+            let caller_config = std::env::var("XDG_CONFIG_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| Path::new(&caller_home).join(".config"));
+            assert!(
+                !caller_config.join("marker").exists(),
+                "the probe wrote into {}",
+                caller_config.display()
+            );
+            assert!(!Path::new(&caller_home).join("marker").exists());
+        }
+
+        /// And the throwaway profile does not accumulate: it is gone by the
+        /// time the check returns, on the healthy path and on the failing one
+        /// (where `ldd` runs under a second throwaway profile of its own).
+        #[test]
+        fn the_throwaway_profile_is_removed_when_the_check_returns() {
+            for (label, body) in [
+                ("cleanup-healthy", RECORDING_WRAPPER.to_string()),
+                (
+                    "cleanup-failed",
+                    RECORDING_WRAPPER.replace("exit 0", "exit 1"),
+                ),
+            ] {
+                let dir = scratch(label);
+                fake_runtime(dir.path(), &body);
+
+                let health = probe_until_not_busy(dir.path());
+                let home = recorded_env(dir.path()).remove("HOME").expect("a HOME");
+                assert!(
+                    !Path::new(&home).exists(),
+                    "{label}: {home} outlived the check ({health:?})"
+                );
+            }
+        }
+
         #[test]
         fn a_client_that_prints_a_version_is_healthy() {
             let dir = scratch("healthy");
@@ -1394,7 +1584,7 @@ mod tests {
                  echo 'OpenMW version 0.47.0'\nexit 0\n",
             );
 
-            let health = check_runtime_health(dir.path(), TargetPlatform::Linux);
+            let health = probe_until_not_busy(dir.path());
             assert_eq!(health.status, RuntimeHealthStatus::Healthy, "{health:?}");
             assert_eq!(health.version.as_deref(), Some("OpenMW version 0.47.0"));
             assert!(health.missing_libraries.is_empty());
@@ -1414,7 +1604,7 @@ mod tests {
                 "#!/bin/sh\necho 'error while loading shared libraries' >&2\nexit 1\n",
             );
 
-            let health = check_runtime_health(dir.path(), TargetPlatform::Linux);
+            let health = probe_until_not_busy(dir.path());
             assert_eq!(health.status, RuntimeHealthStatus::Failed, "{health:?}");
             let reason = health.reason.clone().unwrap_or_default();
             assert!(reason.contains("code 1"), "{reason}");
@@ -1449,7 +1639,7 @@ mod tests {
                  exit 127\n",
             );
 
-            let health = check_runtime_health(dir.path(), TargetPlatform::Linux);
+            let health = probe_until_not_busy(dir.path());
             assert_eq!(health.status, RuntimeHealthStatus::Failed, "{health:?}");
             let sonames: Vec<&str> = health
                 .missing_libraries
@@ -1473,7 +1663,8 @@ mod tests {
 
             let mut command = Command::new(dir.path().join("tes3mp"));
             command.arg("--version").current_dir(dir.path());
-            configure_probe_env(&mut command);
+            let profile = ProbeProfile::create();
+            configure_probe_env(&mut command, &profile);
             let probe = run_captured(command, Duration::from_millis(400)).expect("spawn");
 
             assert!(probe.timed_out, "{probe:?} should have timed out");
@@ -1499,7 +1690,7 @@ mod tests {
         #[test]
         fn a_directory_with_no_client_is_not_checked() {
             let dir = scratch("empty");
-            let health = check_runtime_health(dir.path(), TargetPlatform::Linux);
+            let health = probe_until_not_busy(dir.path());
             assert_eq!(health.status, RuntimeHealthStatus::NotChecked);
             assert!(
                 health
