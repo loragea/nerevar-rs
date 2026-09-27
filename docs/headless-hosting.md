@@ -220,7 +220,8 @@ slug out of band, alongside your address and password.
 }
 ```
 
-`repo` is `owner/name`; `tag` is the release tag as published there, and is
+`repo` is `owner/name`; `tag` is the release tag exactly as published there
+(the official repository's tags read `tes3mp-0.8.1`, not `0.8.1`), and is
 what the client matches against the repository's releases (`releaseId` may be
 left empty) *and* what it enforces against every connected player's installed
 runtime. Only `"kind": "githubRelease"` can be advertised — a path on this
@@ -644,8 +645,11 @@ happening.
 
 #### Reverse proxy
 
-The alternative: leave the daemon on plain HTTP bound to loopback, and put
-nginx or Caddy in front of the sync port. This is the better fit when the host
+The alternative: leave the daemon on plain HTTP, and put nginx or Caddy in
+front of the sync port. The daemon listens on every interface and has no
+bind-address option, so when the proxy runs on another machine the plain
+sync port is still reachable from that network: keep it firewalled from
+anywhere but the proxy. This is the better fit when the host
 already sits behind a web server, when TLS should be mounted under a subpath
 (`https://example.org/nerevar` works as a host address; a path prefix is
 preserved), or when you want certificate renewal to need no service restart.
