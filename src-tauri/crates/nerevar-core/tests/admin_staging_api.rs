@@ -385,6 +385,45 @@ async fn a_co_admin_stages_a_package_and_applies_it() {
     let status: serde_json::Value = get_status(&client, &base, &token).await;
     assert_eq!(status["pendingChanges"], serde_json::Value::Null);
 
+    // ---- Official game data is refused at upload, by name ---------------------
+    let bundled = {
+        use std::io::Write;
+        use zip::write::SimpleFileOptions;
+        let mut buffer = Vec::new();
+        {
+            let mut writer = zip::ZipWriter::new(std::io::Cursor::new(&mut buffer));
+            for (name, bytes) in [
+                ("Bundled/patch.esp", b"TES3".as_slice()),
+                ("Bundled/Data Files/Morrowind.bsa", b"bethesda bytes".as_slice()),
+            ] {
+                writer
+                    .start_file(name, SimpleFileOptions::default())
+                    .unwrap();
+                writer.write_all(bytes).unwrap();
+            }
+            writer.finish().unwrap();
+        }
+        buffer
+    };
+    let refused = client
+        .put(format!("{base}/admin/packages/Bundled"))
+        .bearer_auth(&token)
+        .body(bundled)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), reqwest::StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = refused.json().await.unwrap();
+    assert_eq!(
+        body["error"],
+        serde_json::json!(
+            "Morrowind.bsa is official game data and cannot be distributed; players bring their own copy"
+        )
+    );
+    assert!(!staging_dir(&data_dir).join("Bundled").exists());
+    let status: serde_json::Value = get_status(&client, &base, &token).await;
+    assert_eq!(status["pendingChanges"], serde_json::Value::Null);
+
     // ---- A role without `stage` is refused by the guard, not by the handler -----
     let narrow_token = "b".repeat(64);
     let mut store = nerevar_core::admin::load_admins(&data_dir).expect("store");

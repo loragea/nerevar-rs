@@ -501,8 +501,9 @@ pub fn find_plugin_in_data_paths(
 }
 
 /// Sort plugin filenames by file timestamp and master dependencies (OpenMW ini importer rules).
-/// Extended OpenMW content (`.omwscripts`, `.omwaddon`, `.bsa`) keeps the load-order sequence
+/// Extended OpenMW content (`.omwscripts`, `.omwaddon`) keeps the load-order sequence
 /// from `plugin_names` and is appended after dependency-sorted `.esm`/`.esp` entries.
+/// Archives (`.bsa`) are not `content=` entries and are dropped.
 pub fn sort_content_plugins(
     index: &PluginIndex,
     plugin_names: &[String],
@@ -623,6 +624,22 @@ mod tests {
                 .any(|name| name.eq_ignore_ascii_case("pack.omwscripts")),
             "expected pack.omwscripts, got {sorted:?}"
         );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sort_content_plugins_drops_archives() {
+        let dir = std::env::temp_dir().join(format!("nerevar-sort-bsa-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("Foo.esp"), b"").unwrap();
+        fs::write(dir.join("Foo.bsa"), b"BSA").unwrap();
+
+        let index = PluginIndex::build(&[dir.clone()]);
+        let sorted =
+            sort_content_plugins(&index, &["Foo.bsa".into(), "Foo.esp".into()]).unwrap();
+        assert_eq!(sorted, vec!["Foo.esp".to_string()]);
 
         let _ = fs::remove_dir_all(&dir);
     }

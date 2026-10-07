@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 
-use super::content_files::is_openmw_content_path;
+use super::content_files::is_package_plugin_path;
 
-/// Directories that never contain OpenMW `content=` files (matches instance scan skips).
+/// Directories that never contain OpenMW `content=` files or archives (matches instance scan skips).
 const PLUGIN_SEARCH_SKIP_DIRS: &[&str] = &[
     "meshes",
     "textures",
@@ -101,7 +101,7 @@ fn index_directory(dir: &Path, out: &mut HashMap<String, PathBuf>) {
             continue;
         }
 
-        if !path.is_file() || !is_openmw_content_path(&path) {
+        if !path.is_file() || !is_package_plugin_path(&path) {
             continue;
         }
 

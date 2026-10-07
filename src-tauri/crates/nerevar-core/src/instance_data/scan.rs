@@ -2,9 +2,10 @@ use std::path::Path;
 
 use uuid::Uuid;
 
+use super::official_files::{is_official_game_file, official_game_file_message};
 use super::paths::{INSTANCE_DATA_DIR, NEREVAR_DIR};
 use crate::instance_setup::INSTANCE_TES3MP_DIR;
-use crate::openmw_ini_importer::is_openmw_content_path;
+use crate::openmw_ini_importer::is_package_plugin_path;
 use crate::openmw_ini_importer::should_skip_plugin_search_dir;
 use super::progress::{BackgroundOperationPhase, ProgressEmitter};
 use super::types::{PackageKind, ScannedPackage};
@@ -105,6 +106,10 @@ pub fn should_skip_package_dir(name: &str) -> bool {
     name.eq_ignore_ascii_case(INSTANCE_DATA_DIR)
 }
 
+/// The package's `content=` files and archives, by file name. Archives stay
+/// in the list so admins can enable or disable them like any plugin, and a
+/// package whose only plugin is an archive still counts as a Mod: it carries
+/// content. The resolver turns archives into `fallback-archive=` lines.
 fn find_plugins(dir: &Path) -> Vec<String> {
     let mut plugins = Vec::new();
     collect_plugins(dir, &mut plugins);
@@ -133,10 +138,20 @@ fn collect_plugins(dir: &Path, out: &mut Vec<String>) {
         if !path.is_file() {
             continue;
         }
-        if !is_openmw_content_path(&path) {
+        if !is_package_plugin_path(&path) {
             continue;
         }
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if is_official_game_file(name) {
+                // Never a package plugin or archive: the player's own install
+                // provides it, and the manifest build leaves the file out.
+                log::warn!(
+                    "{}: {}; not listing it as a plugin",
+                    path.display(),
+                    official_game_file_message(name)
+                );
+                continue;
+            }
             out.push(name.to_string());
         }
     }
@@ -252,7 +267,23 @@ mod tests {
             .find(|p| p.name == "Tamriel Rebuilt")
             .expect("Tamriel Rebuilt");
         assert!(tr.plugins.iter().any(|p| p.eq_ignore_ascii_case("TR_Mainland.esm")));
+        // Archives stay in the plugin list (admins toggle them there); the
+        // resolver is what keeps them out of `content=`.
         assert!(tr.plugins.iter().any(|p| p.eq_ignore_ascii_case("TR_Mainland.bsa")));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_package_with_only_an_archive_is_a_mod() {
+        let dir = std::env::temp_dir().join(format!("nerevar-scan-bsa-only-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Textures.bsa"), b"BSA").unwrap();
+
+        let scanned = scan_package_dir("Archive Only", &dir);
+        assert!(matches!(scanned.kind, PackageKind::Mod));
+        assert_eq!(scanned.plugins, vec!["Textures.bsa".to_string()]);
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -268,6 +299,21 @@ mod tests {
         let plugins = find_plugins(&dir);
         assert!(plugins.iter().any(|p| p.eq_ignore_ascii_case("visible.esp")));
         assert!(!plugins.iter().any(|p| p.eq_ignore_ascii_case("hidden.esp")));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn official_game_files_are_never_listed_as_plugins() {
+        let dir = std::env::temp_dir().join(format!("nerevar-scan-official-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Data Files")).unwrap();
+        std::fs::write(dir.join("Patch.esp"), b"").unwrap();
+        std::fs::write(dir.join("Data Files/Morrowind.esm"), b"").unwrap();
+        std::fs::write(dir.join("Data Files/bloodmoon.bsa"), b"").unwrap();
+
+        let scanned = scan_package_dir("Bundled", &dir);
+        assert_eq!(scanned.plugins, vec!["Patch.esp".to_string()]);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

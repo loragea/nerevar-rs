@@ -107,12 +107,18 @@ function dedupePluginNamesCaseInsensitive(names: string[]): string[] {
   return result;
 }
 
+/** Archives load through `fallback-archive=`, not `content=`, so they have no
+ * place in the global content order (the backend drops them from it too). */
+function isArchivePlugin(file: string): boolean {
+  return file.toLowerCase().endsWith(".bsa");
+}
+
 function collectEnabledPluginNames(entries: LoadOrderEntry[]): string[] {
   const names: string[] = [];
   for (const entry of entries) {
     if (!entry.enabled) continue;
     for (const plugin of entry.plugins) {
-      if (plugin.enabled) {
+      if (plugin.enabled && !isArchivePlugin(plugin.file)) {
         names.push(plugin.file);
       }
     }

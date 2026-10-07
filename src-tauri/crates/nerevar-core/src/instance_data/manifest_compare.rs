@@ -26,7 +26,9 @@ pub fn manifests_differ(local: &NerevarManifest, remote: &NerevarManifest) -> bo
         }
     }
 
-    if local.resolved.content != remote.resolved.content {
+    if local.resolved.content != remote.resolved.content
+        || local.resolved.archives != remote.resolved.archives
+    {
         return true;
     }
 

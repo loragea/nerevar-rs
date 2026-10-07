@@ -20,6 +20,7 @@ use crate::instance_data::{
 use super::staging::{
     clear_staging, data_package_names, load_pending, staged_package_dir, PendingChanges,
 };
+use super::upload::refuse_official_game_files;
 
 /// One staged package moving into `data/`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,6 +137,13 @@ pub fn execute_apply(
 ) -> Result<ApplyOutcome, String> {
     let pending = load_pending(data_dir)?;
     let plan = plan_apply(&data_package_names(data_dir)?, &pending)?;
+
+    // Upload already refuses official game data; this catches a staged tree
+    // that reached `staging/` some other way, before any file moves.
+    for install in &plan.installs {
+        refuse_official_game_files(&staged_package_dir(data_dir, &install.name))
+            .map_err(|reason| format!("Staged package \"{}\": {reason}", install.name))?;
+    }
 
     for name in &plan.removals {
         let path = package_abs_path(data_dir, name);
@@ -326,5 +334,33 @@ mod tests {
         let mut staged_escape = PendingChanges::default();
         staged_escape.staged.push(staged("../elsewhere"));
         assert!(plan_apply(&[], &staged_escape).is_err());
+    }
+
+    #[test]
+    fn apply_refuses_a_staged_tree_with_official_game_data_before_moving_anything() {
+        let data_dir = std::env::temp_dir().join(format!(
+            "nerevar-apply-official-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let staged_dir = staged_package_dir(&data_dir, "Bundled");
+        std::fs::create_dir_all(&staged_dir).unwrap();
+        std::fs::write(staged_dir.join("Tribunal.esm"), b"x").unwrap();
+        let mut pending = PendingChanges::default();
+        pending.upsert_staged(staged("Bundled"));
+        crate::admin::staging::save_pending(&data_dir, &pending).unwrap();
+
+        let error = match execute_apply("id", "name", &data_dir, &data_dir) {
+            Ok(_) => panic!("apply must refuse official game data"),
+            Err(error) => error,
+        };
+        assert!(
+            error.contains("Tribunal.esm is official game data and cannot be distributed"),
+            "{error}"
+        );
+        assert!(!data_dir.join("Bundled").exists(), "nothing moved into data/");
+        assert!(staged_dir.is_dir(), "the staged tree is left for the admin to discard");
+
+        let _ = std::fs::remove_dir_all(&data_dir);
     }
 }

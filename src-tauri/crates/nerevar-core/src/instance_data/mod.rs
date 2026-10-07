@@ -4,6 +4,7 @@ mod lookup;
 mod manifest;
 mod manifest_compare;
 mod mo2_modlist;
+mod official_files;
 mod openmw_cfg;
 mod paths;
 mod progress;
@@ -22,6 +23,10 @@ pub use manifest::{
     build_manifest, load_manifest, validate_manifest_against_disk,
 };
 pub use manifest_compare::manifests_differ;
+pub use official_files::{
+    find_official_game_files, is_official_game_file, official_game_file_message,
+    strip_official_game_files, OFFICIAL_GAME_FILES,
+};
 pub use openmw_cfg::{
     resolve_instance_openmw_config, write_ephemeral_openmw_cfg, write_instance_launch_cfg,
 };
