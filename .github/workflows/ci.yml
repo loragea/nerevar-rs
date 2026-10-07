@@ -72,9 +72,27 @@ jobs:
       # died during nerevar-core's unit tests on every run so far. One thread
       # makes the order exact, so the last line printed before the runner
       # goes names the test that preceded the killer.
-      - name: Core unit tests, one at a time
-        run: cargo test -p nerevar-core --lib -- --test-threads=1
+      - name: Core unit tests, one process each, two minutes apiece
         working-directory: src-tauri
+        run: |
+          set -uo pipefail
+          bin=$(cargo test -p nerevar-core --lib --no-run --message-format=json 2>/dev/null |
+            jq -r 'select(.profile.test==true and .target.name=="nerevar-core") | .executable' | tail -1)
+          echo "test binary: $bin"
+          "$bin" --list 2>/dev/null | sed -n 's/: test$//p' | while read -r t; do
+            start=$(date +%s)
+            if timeout -k 5 120 "$bin" --exact "$t" --test-threads=1 >/tmp/one-test.log 2>&1; then
+              echo "ok   $(( $(date +%s) - start ))s $t"
+            else
+              rc=$?
+              echo "FAIL rc=$rc $(( $(date +%s) - start ))s $t"
+              tail -20 /tmp/one-test.log
+              free -m | grep Mem
+              df -h / | tail -1
+              ps -eo pid,ppid,rss,etimes,args --sort=-rss | head -8
+            fi
+          done
+          echo "all core tests attempted"
 
       - name: Run the tests
         run: cargo test --workspace
