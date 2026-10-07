@@ -140,6 +140,11 @@ sudo -u nerevar rsync -a --delete "Better Bodies/" /srv/nerevar/mundus/data/"Bet
 
 Do not put base-game data files in a package — see the mod-redistribution notice
 in the [README](../README.md#important-disclaimer-notice--read-before-hosting-or-sharing-mods).
+The host enforces this for the six official files (`Morrowind.esm`,
+`Tribunal.esm`, `Bloodmoon.esm` and their three `.bsa` archives, matched by name
+at any depth): an admin upload containing one is refused, and the manifest
+build leaves any it finds in `data/` out of the manifest with a warning, so they
+are never served.
 Base game data lives outside the instance and is named once, in the load order's
 `baseGameData` field.
 
