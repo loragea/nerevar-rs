@@ -13,13 +13,11 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  rust:
-    name: cargo check / test / clippy
+  kill-probe:
+    name: DIAGNOSTIC kill -KILL -<pgid> on this runner
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-
       # DIAGNOSTIC: does this runner's kill(1) honour `kill -KILL -<pgid>`,
       # the form nerevar-core shells out to? Run in a throwaway session so a
       # kill(1) that signals its own process group instead takes only that
@@ -39,6 +37,13 @@ jobs:
               echo "sleeper dead: the group kill worked"
             fi'
           echo "probe session exit=$?  (137 means kill(1) killed its own process group)"
+
+  rust:
+    name: cargo check / test / clippy
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
 
       # Everything the Tauri crate links against. The daemon and the CLI need
       # none of it, but the workspace builds as a unit.
