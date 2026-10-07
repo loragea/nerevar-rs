@@ -620,7 +620,7 @@ fn run_ldd(elf: &Path, library_dir: Option<&Path>) -> Result<String, String> {
 /// wrapper runs the real binary as a plain foreground command, so killing
 /// the wrapper alone would leave the game running and the pipes open, and
 /// the reader threads would never finish. Same reasoning, and the same
-/// `kill(1)` shell-out, as `process_manager::state::kill_process_group`.
+/// kill(2) call, as `process_manager::state::kill_process_group`.
 #[cfg(unix)]
 fn run_captured(mut command: Command, timeout: Duration) -> Result<ProbeOutput, String> {
     use std::io::Read;
@@ -692,17 +692,31 @@ fn run_captured(mut command: Command, timeout: Duration) -> Result<ProbeOutput, 
     })
 }
 
-/// Best-effort SIGKILL to the process group `pid` leads. Errors are
-/// swallowed: `child.kill()` right after is the authoritative fallback.
+/// Best-effort SIGKILL to the process group `pid` leads (`run_captured`
+/// spawns with `process_group(0)`, so `pid` is also its pgid).
+///
+/// The group is signalled with kill(2), never by running kill(1): kill(1)'s
+/// handling of a negative pid differs between implementations, and a common
+/// one (procps-ng 3.3.17) signals the caller's own process group instead.
+/// Errors are ignored: `child.kill()` right after is the authoritative
+/// fallback.
 #[cfg(unix)]
 fn kill_process_group(pid: u32) {
-    let _ = Command::new("kill")
-        .arg("-KILL")
-        .arg(format!("-{pid}"))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    // pid 0 would make kill(2) signal our own process group — the very
+    // failure this function exists to avoid — and a pid past `pid_t` is not
+    // a child we spawned.
+    let Ok(pgid) = libc::pid_t::try_from(pid) else {
+        return;
+    };
+    if pgid <= 0 {
+        return;
+    }
+    // SAFETY: kill(2) has no memory-safety preconditions. `pgid` is the pid
+    // of a live child spawned with `process_group(0)`, so it is that
+    // child's process-group id, and the negated value addresses that group.
+    unsafe {
+        libc::kill(-pgid, libc::SIGKILL);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1669,6 +1683,80 @@ mod tests {
 
             assert!(probe.timed_out, "{probe:?} should have timed out");
             assert!(probe.combined().contains("starting"), "{probe:?}");
+        }
+
+        /// Kills a leftover sleeper if the test fails before the group kill
+        /// lands, so a failing run leaves nothing behind.
+        struct KillOnDrop(libc::pid_t);
+
+        impl Drop for KillOnDrop {
+            fn drop(&mut self) {
+                if self.0 > 0 {
+                    // SAFETY: kill(2) has no memory-safety preconditions;
+                    // the pid is positive, so only that process is addressed.
+                    unsafe {
+                        libc::kill(self.0, libc::SIGKILL);
+                    }
+                }
+            }
+        }
+
+        /// True once `pid` no longer exists or is a zombie awaiting its
+        /// reaper.
+        fn process_gone(pid: libc::pid_t) -> bool {
+            match fs::read_to_string(format!("/proc/{pid}/status")) {
+                Err(_) => true,
+                Ok(status) => status
+                    .lines()
+                    .any(|line| line.starts_with("State:") && line.contains('Z')),
+            }
+        }
+
+        /// The timeout must take down the wrapper's whole process group, not
+        /// just the wrapper: a game left running would hold the pipes open.
+        /// The wrapper runs through `sh` rather than being exec'd so the
+        /// just-written script cannot hit ETXTBSY.
+        #[test]
+        fn a_timeout_kills_the_wrappers_grandchild_too() {
+            let dir = scratch("group-kill");
+            let script = dir.path().join("wrapper.sh");
+            let pid_file = dir.path().join("sleeper.pid");
+            // The sleeper drops the pipes so `run_captured` returns even if
+            // the group kill misses it; the `/proc` check is then the test.
+            fs::write(
+                &script,
+                "#!/bin/sh\nsleep 300 >/dev/null 2>&1 &\necho $! > \"$1\"\nwait\n",
+            )
+            .unwrap();
+
+            let mut command = Command::new("sh");
+            command.arg(&script).arg(&pid_file);
+            let probe = run_captured(command, Duration::from_millis(400)).expect("spawn");
+            assert!(probe.timed_out, "{probe:?} should have timed out");
+
+            let sleeper: libc::pid_t = fs::read_to_string(&pid_file)
+                .expect("the wrapper wrote its sleeper's pid")
+                .trim()
+                .parse()
+                .expect("a pid");
+            let _guard = KillOnDrop(sleeper);
+
+            let start = std::time::Instant::now();
+            while !process_gone(sleeper) {
+                assert!(
+                    start.elapsed() < Duration::from_secs(2),
+                    "the grandchild {sleeper} survived the timeout"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+
+        /// pid 0 must not reach kill(2): `kill(0, SIGKILL)` would take down
+        /// this test binary's own process group. Surviving is the assertion.
+        #[test]
+        fn the_group_kill_ignores_pid_zero() {
+            kill_process_group(0);
+            kill_process_group(u32::MAX);
         }
 
         /// And the timeout as the whole check reports it. Uses a wrapper that

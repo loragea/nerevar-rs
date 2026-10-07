@@ -41,6 +41,12 @@ urlencoding = "2.1.3"
 csv = "1.3"
 uuid = { version = "1.23.1", features = ["v4"] }
 
+# kill(2) for signalling a child's whole process group. Already in the lock
+# file as a transitive dependency; named here so core can call it directly
+# instead of shelling out to kill(1).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 # Self-dev-dep: enables this crate's own `test-util` feature (gates
 # `reporter::CollectingEventSink`) for its `tests/` integration binaries.
