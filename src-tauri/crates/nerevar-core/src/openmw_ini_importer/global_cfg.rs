@@ -380,10 +380,16 @@ pub fn read_first_global_data_path() -> Option<String> {
 }
 
 fn compose_active_openmw_cfg(nerevar_base: &str, launch_overlay: &str) -> String {
-    let base = parse_cfg_contents(nerevar_base);
+    let mut base = parse_cfg_contents(nerevar_base);
     let launch = parse_cfg_contents(launch_overlay);
-    let mut merged = merge_launch_overlay(base, launch);
-    ensure_base_game_archives(&mut merged);
+    // Before the merge, so the base game's archives are registered ahead of
+    // the launch overlay's package archives: OpenMW lets a later archive
+    // override an earlier one, and a mod's archive must win over vanilla.
+    let data_dir = first_data_path(&base).or_else(|| first_data_path(&launch));
+    if let Some(data_dir) = data_dir {
+        ensure_base_game_archives(&mut base, &data_dir);
+    }
+    let merged = merge_launch_overlay(base, launch);
 
     let mut out = String::from("# Nerevar active OpenMW config (managed during TES3MP launch)\n");
     out.push_str(&cfg_to_string(&merged));
@@ -391,15 +397,13 @@ fn compose_active_openmw_cfg(nerevar_base: &str, launch_overlay: &str) -> String
 }
 
 /// Repair configs imported before the base-archive rule existed: register any
-/// of the three base-game archives that sit in the first `data=` directory but
-/// are missing from `fallback-archive`. Never reorders or removes entries.
-fn ensure_base_game_archives(cfg: &mut MultiStrMap) {
-    let Some(data_dir) = first_data_path(cfg) else {
-        return;
-    };
+/// of the three base-game archives that sit in `data_dir` (the first `data=`
+/// directory) but are missing from `fallback-archive`. Never reorders or
+/// removes entries.
+fn ensure_base_game_archives(cfg: &mut MultiStrMap, data_dir: &Path) {
     let mut archives = cfg.get("fallback-archive").cloned().unwrap_or_default();
     let before = archives.len();
-    append_present_base_archives(&mut archives, &data_dir);
+    append_present_base_archives(&mut archives, data_dir);
     if archives.len() != before {
         cfg.insert("fallback-archive".to_string(), archives);
     }
@@ -430,9 +434,19 @@ fn merge_launch_overlay(mut base: MultiStrMap, launch: MultiStrMap) -> MultiStrM
         if matches!(key.as_str(), "encoding" | "content" | "data") {
             continue;
         }
+        // Archive names are file names OpenMW matches without regard to
+        // case, so `tribunal.bsa` already registers `Tribunal.bsa`.
+        let case_insensitive = key == "fallback-archive";
         let target = base.entry(key).or_default();
         for value in values {
-            if !target.iter().any(|existing| existing == &value) {
+            let listed = target.iter().any(|existing| {
+                if case_insensitive {
+                    existing.trim().eq_ignore_ascii_case(value.trim())
+                } else {
+                    existing == &value
+                }
+            });
+            if !listed {
                 target.push(value);
             }
         }
@@ -642,6 +656,30 @@ mod tests {
         );
         let composed = compose_active_openmw_cfg(&base, "content=Morrowind.esm");
         assert_eq!(composed_archives(&composed), vec!["Morrowind.bsa"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The player's base config registers only `Morrowind.bsa`; the
+    /// expansions' archives are found on disk; the launch overlay carries a
+    /// package archive. Vanilla comes first, then the package's, each once.
+    #[test]
+    fn compose_puts_vanilla_archives_before_package_archives() {
+        let dir = archive_compose_dir(
+            "compose-archives-package",
+            &["Morrowind.bsa", "Tribunal.bsa", "Bloodmoon.bsa"],
+        );
+        let base = format!(
+            "data={}\nfallback-archive=Morrowind.bsa\n",
+            quote_data_path(&dir.join("Data Files"))
+        );
+        let launch = "content=Morrowind.esm\ncontent=Foo.esp\n\
+                      fallback-archive=Foo.bsa\nfallback-archive=morrowind.bsa\n";
+        let composed = compose_active_openmw_cfg(&base, launch);
+        assert_eq!(
+            composed_archives(&composed),
+            vec!["Morrowind.bsa", "Tribunal.bsa", "Bloodmoon.bsa", "Foo.bsa"]
+        );
+        assert!(!composed.contains("content=Foo.bsa"));
         let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -209,7 +209,15 @@ pub struct GithubReleaseResponse {
 pub struct ResolvedOpenMwConfig {
     pub encoding: String,
     pub data_paths: Vec<String>,
+    /// `content=` lines: `.esm`/`.esp`/`.omwaddon`/`.omwscripts`, never an archive.
     pub content: Vec<String>,
+    /// `fallback-archive=` lines: the enabled packages' `.bsa` files in
+    /// package priority order. OpenMW finds each by name in the `data=`
+    /// directories. The base game's archives are never listed here; the
+    /// player's own config registers them. Absent in manifests from hosts
+    /// that predate the field.
+    #[serde(default)]
+    pub archives: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

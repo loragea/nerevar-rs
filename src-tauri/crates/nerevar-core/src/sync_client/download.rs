@@ -606,6 +606,7 @@ mod tests {
                 encoding: "win1252".into(),
                 data_paths: vec![],
                 content: vec![],
+                archives: vec![],
             },
             total_download_bytes: 0,
             tes3mp_server_port: 25565,

@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 
 use super::paths::package_abs_path;
 use super::types::{LoadOrder, NerevarManifest, ResolvedOpenMwConfig};
-use crate::openmw_ini_importer::{quote_data_path, sort_content_plugins, PluginIndex};
+use crate::openmw_ini_importer::{
+    is_archive_file, quote_data_path, sort_content_plugins, PluginIndex,
+};
 
 const DEFAULT_BASE_ESMS: &[&str] = &["Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm"];
 
@@ -26,17 +28,27 @@ pub fn resolve_load_order(
         data_paths.push(package_abs_path(data_dir, &entry.relative_dir));
     }
 
+    let index = PluginIndex::build(&data_paths);
+
+    // A package's plugin list holds both `content=` files and archives; the
+    // extension decides which line each becomes. Archives go to
+    // `fallback-archive=` in package priority order and never to `content=`.
     let mut plugin_names = Vec::new();
+    let mut archives: Vec<String> = Vec::new();
     for entry in enabled_entries {
         for plugin in &entry.plugins {
-            if plugin.enabled {
+            if !plugin.enabled {
+                continue;
+            }
+            if is_archive_file(&plugin.file) {
+                push_archive(&mut archives, &index, &plugin.file);
+            } else {
                 plugin_names.push(plugin.file.clone());
             }
         }
     }
     let has_explicit_content_order = load_order.content_order.is_some();
 
-    let index = PluginIndex::build(&data_paths);
     if let Some(base_path) = load_order
         .base_game_data
         .as_ref()
@@ -64,7 +76,20 @@ pub fn resolve_load_order(
         encoding: "win1252".to_string(),
         data_paths: data_paths_quoted,
         content,
+        archives,
     })
+}
+
+/// Appends `name` to `archives` when it is on disk under a `data=` path and
+/// not already listed (ignoring case). A missing `fallback-archive` is fatal
+/// to OpenMW, so an archive that is not there is left out rather than listed.
+fn push_archive(archives: &mut Vec<String>, index: &PluginIndex, name: &str) {
+    if archives.iter().any(|listed| listed.eq_ignore_ascii_case(name)) {
+        return;
+    }
+    if index.find(name).is_some() {
+        archives.push(name.to_string());
+    }
 }
 
 /// Build launch config for a synced client using local data paths and the host's plugin order.
@@ -82,8 +107,16 @@ pub fn resolve_synced_load_order(
 
     let index = PluginIndex::build(&data_paths);
     let mut content = Vec::new();
+    let mut archives = Vec::new();
+    for plugin in &manifest.resolved.archives {
+        push_archive(&mut archives, &index, plugin);
+    }
     for plugin in &manifest.resolved.content {
-        if index.find(plugin).is_some() {
+        // A host that predates `archives` listed a package's `.bsa` here;
+        // OpenMW refuses one as `content=`, so it becomes an archive instead.
+        if is_archive_file(plugin) {
+            push_archive(&mut archives, &index, plugin);
+        } else if index.find(plugin).is_some() {
             content.push(plugin.clone());
         }
     }
@@ -91,11 +124,15 @@ pub fn resolve_synced_load_order(
     if content.is_empty() {
         content = local.content;
     }
+    if archives.is_empty() {
+        archives = local.archives;
+    }
 
     Ok(ResolvedOpenMwConfig {
         encoding: local.encoding,
         data_paths: local.data_paths,
         content,
+        archives,
     })
 }
 
@@ -267,6 +304,7 @@ mod tests {
                 encoding: "win1252".into(),
                 data_paths: vec![],
                 content: vec!["Better Bodies.esp".into()],
+                archives: vec![],
             },
             total_download_bytes: 0,
             tes3mp_server_port: 25565,
@@ -333,6 +371,128 @@ mod tests {
         assert!(morrowind_pos < bloodmoon_pos);
         assert!(bloodmoon_pos < tribunal_pos);
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn plugin(file: &str) -> crate::instance_data::types::PluginEntry {
+        crate::instance_data::types::PluginEntry {
+            file: file.into(),
+            enabled: true,
+        }
+    }
+
+    fn package_entry(id: &str, dir: &str, enabled: bool, priority: u32, plugins: &[&str]) -> LoadOrderEntry {
+        LoadOrderEntry {
+            id: id.into(),
+            name: dir.into(),
+            kind: PackageKind::Mod,
+            relative_dir: dir.into(),
+            enabled,
+            priority,
+            plugins: plugins.iter().map(|file| plugin(file)).collect(),
+            tree_checksum: None,
+        }
+    }
+
+    /// Two packages with an `.esp` and a `.bsa` each, plus a disabled one.
+    fn archive_fixture(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("nerevar-resolve-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        ensure_instance_data_layout(&dir).unwrap();
+        for (pkg, files) in [
+            ("Foo", &["Foo.esp", "Foo.bsa"][..]),
+            ("Bar", &["Bar.bsa"][..]),
+            ("Off", &["Off.esp", "Off.bsa"][..]),
+        ] {
+            std::fs::create_dir_all(dir.join(pkg)).unwrap();
+            for file in files {
+                std::fs::write(dir.join(pkg).join(file), b"").unwrap();
+            }
+        }
+        dir
+    }
+
+    fn archive_load_order(content_order: Option<Vec<String>>) -> LoadOrder {
+        LoadOrder {
+            version: LOAD_ORDER_VERSION,
+            base_game_data: None,
+            content_order,
+            entries: vec![
+                // Bar has the higher priority, so its archive loads last.
+                package_entry("2", "Bar", true, 20, &["Bar.bsa"]),
+                package_entry("1", "Foo", true, 10, &["Foo.bsa", "Foo.esp"]),
+                package_entry("3", "Off", false, 30, &["Off.bsa", "Off.esp"]),
+            ],
+        }
+    }
+
+    #[test]
+    fn an_enabled_packages_bsa_is_an_archive_never_content() {
+        let dir = archive_fixture("archives");
+        let resolved = resolve_load_order(&dir, &archive_load_order(None)).unwrap();
+        assert_eq!(resolved.content, vec!["Foo.esp".to_string()]);
+        assert_eq!(
+            resolved.archives,
+            vec!["Foo.bsa".to_string(), "Bar.bsa".to_string()],
+            "archives follow package priority; the disabled package contributes none"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The GUI's global order is built from every enabled plugin, archives
+    /// included; naming a `.bsa` there must not put it in `content=`.
+    #[test]
+    fn an_explicit_content_order_naming_a_bsa_still_keeps_it_out_of_content() {
+        let dir = archive_fixture("archives-explicit");
+        let order = archive_load_order(Some(vec![
+            "Bar.bsa".into(),
+            "Foo.bsa".into(),
+            "Foo.esp".into(),
+            "Off.esp".into(),
+        ]));
+        let resolved = resolve_load_order(&dir, &order).unwrap();
+        assert_eq!(resolved.content, vec!["Foo.esp".to_string()]);
+        assert_eq!(resolved.archives, vec!["Foo.bsa".to_string(), "Bar.bsa".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_disabled_archive_plugin_is_left_out() {
+        let dir = archive_fixture("archives-disabled");
+        let mut order = archive_load_order(None);
+        order.entries[1].plugins[0].enabled = false; // Foo.bsa
+        let resolved = resolve_load_order(&dir, &order).unwrap();
+        assert_eq!(resolved.archives, vec!["Bar.bsa".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A manifest from a host that predates `archives` lists the `.bsa` in
+    /// `content`; the client moves it to `archives`.
+    #[test]
+    fn synced_resolution_moves_a_legacy_hosts_bsa_out_of_content() {
+        let dir = archive_fixture("archives-synced");
+        let manifest = NerevarManifest {
+            version: 1,
+            instance_id: "x".into(),
+            instance_name: "x".into(),
+            generated_at: String::new(),
+            base_game_data: None,
+            packages: vec![],
+            resolved: ResolvedOpenMwConfig {
+                encoding: "win1252".into(),
+                data_paths: vec![],
+                content: vec!["Foo.esp".into(), "Foo.bsa".into(), "Bar.bsa".into()],
+                archives: vec![],
+            },
+            total_download_bytes: 0,
+            tes3mp_server_port: 25565,
+            tes3mp_server_password: String::new(),
+            required_data_files: vec![],
+            instance_settings: InstanceSettings::default(),
+        };
+        let resolved = resolve_synced_load_order(&dir, &archive_load_order(None), &manifest).unwrap();
+        assert_eq!(resolved.content, vec!["Foo.esp".to_string()]);
+        assert_eq!(resolved.archives, vec!["Foo.bsa".to_string(), "Bar.bsa".to_string()]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use crc32fast::Hasher;
 
 use crate::data::{RequiredDataFileEntry, ResolvedOpenMwConfig};
-use crate::openmw_ini_importer::PluginIndex;
+use crate::openmw_ini_importer::{is_archive_file, PluginIndex};
 
 const REQUIRED_DATA_FILES: &str = "requiredDataFiles.json";
 const SERVER_DATA_SUBDIR: &str = "server/data";
@@ -73,6 +73,12 @@ pub fn build_required_data_files(
     }
 
     for plugin in &resolved.content {
+        // TES3MP compares this list against the client's `content=` files by
+        // index; an archive is never one of them. The resolver already keeps
+        // archives out of `content`; a manifest from an older host may not.
+        if is_archive_file(plugin) {
+            continue;
+        }
         let path = resolve_plugin_path(&index, plugin)?;
         let computed = file_crc32_hex(&path)?;
         let checksums = merge_checksums(plugin, computed);
@@ -388,5 +394,26 @@ mod tests {
         }]);
         assert!(json.contains("\"Morrowind.esm\""));
         assert!(json.contains("0x7B6AF5B9"));
+    }
+
+    #[test]
+    fn archives_never_reach_the_required_data_files_list() {
+        let dir = temp_install("archives");
+        let pkg = dir.join("Foo");
+        std::fs::create_dir_all(&pkg).unwrap();
+        std::fs::write(pkg.join("Foo.esp"), b"plugin").unwrap();
+        std::fs::write(pkg.join("Foo.bsa"), b"archive").unwrap();
+
+        let resolved = ResolvedOpenMwConfig {
+            encoding: "win1252".into(),
+            data_paths: vec![pkg.to_string_lossy().into_owned()],
+            content: vec!["Foo.esp".into(), "Foo.bsa".into()],
+            archives: vec!["Foo.bsa".into()],
+        };
+        let entries = build_required_data_files(&resolved, &dir).unwrap();
+        let files: Vec<&str> = entries.iter().map(|entry| entry.file.as_str()).collect();
+        assert_eq!(files, vec!["Foo.esp"]);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

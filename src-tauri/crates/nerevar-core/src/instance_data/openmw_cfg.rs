@@ -56,6 +56,12 @@ fn write_resolved_to_path(
     cfg.insert("encoding".to_string(), vec![resolved.encoding.clone()]);
     cfg.insert("data".to_string(), resolved.data_paths.clone());
     cfg.insert("content".to_string(), resolved.content.clone());
+    // Package archives, after anything above. When the launch config is
+    // composed with the player's base config, the base's (vanilla) archives
+    // stay ahead of these — see `global_cfg::compose_active_openmw_cfg`.
+    if !resolved.archives.is_empty() {
+        cfg.insert("fallback-archive".to_string(), resolved.archives.clone());
+    }
     apply_openmw_cfg_override_lines(&mut cfg, openmw_cfg_overrides);
 
     let mut file =
@@ -84,6 +90,7 @@ mod tests {
                 "Bloodmoon.esm".into(),
                 "Better Bodies.esp".into(),
             ],
+            archives: vec![],
         }
     }
 
@@ -120,6 +127,34 @@ mod tests {
 
         let contents = std::fs::read_to_string(launch_cfg_path(&dir)).unwrap();
         assert!(contents.contains("groundcover=Mod.esp"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn writes_package_archives_as_fallback_archive_lines() {
+        let dir = std::env::temp_dir().join(format!(
+            "nerevar-openmw-cfg-archives-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut resolved = sample_resolved();
+        resolved.content.push("Foo.esp".into());
+        resolved.archives = vec!["Foo.bsa".into(), "Bar.bsa".into()];
+        write_ephemeral_openmw_cfg(&dir, &resolved, &[]).unwrap();
+
+        let contents = std::fs::read_to_string(launch_cfg_path(&dir)).unwrap();
+        assert!(contents.contains("content=Foo.esp"));
+        assert!(!contents.contains("content=Foo.bsa"), "{contents}");
+        let archive_lines: Vec<&str> = contents
+            .lines()
+            .filter(|line| line.starts_with("fallback-archive="))
+            .collect();
+        assert_eq!(
+            archive_lines,
+            vec!["fallback-archive=Foo.bsa", "fallback-archive=Bar.bsa"]
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
