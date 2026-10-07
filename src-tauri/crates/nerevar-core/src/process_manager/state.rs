@@ -335,21 +335,30 @@ impl ProcessManager {
 /// `process_group(0)` on every TES3MP child, so `pid` is also its pgid).
 /// Reaches the real ELF binary a wrapper script (tes3mp/tes3mp-server) ran
 /// as a plain child rather than `exec`'d into — see the comment on
-/// `configure_tes3mp_command` in spawn.rs. Shells out to `kill(1)` rather
-/// than a raw `kill(2)` FFI call so this stays dependency-free — core takes
-/// no new crate just to send a signal; `kill(1)` is
-/// as ubiquitous on Unix as the shell itself. Errors (missing `kill(1)`,
-/// already-dead group) are swallowed — the direct `child.kill()` right
-/// after this call is still the authoritative, always-available fallback.
+/// `configure_tes3mp_command` in spawn.rs.
+///
+/// The group is signalled with kill(2), never by running kill(1): kill(1)'s
+/// handling of a negative pid differs between implementations, and a common
+/// one (procps-ng 3.3.17) signals the caller's own process group instead —
+/// killing this app. Errors (an already-dead group) are ignored — the direct
+/// `child.kill()` right after this call is the authoritative fallback.
 #[cfg(unix)]
 fn kill_process_group(pid: u32) {
-    let _ = std::process::Command::new("kill")
-        .arg("-KILL")
-        .arg(format!("-{pid}"))
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+    // pid 0 would make kill(2) signal our own process group — the very
+    // failure this function exists to avoid — and a pid past `pid_t` is not
+    // a child we spawned.
+    let Ok(pgid) = libc::pid_t::try_from(pid) else {
+        return;
+    };
+    if pgid <= 0 {
+        return;
+    }
+    // SAFETY: kill(2) has no memory-safety preconditions. `pgid` is the pid
+    // of a live child spawned with `process_group(0)`, so it is that
+    // child's process-group id, and the negated value addresses that group.
+    unsafe {
+        libc::kill(-pgid, libc::SIGKILL);
+    }
 }
 
 /// Kill and reap the child held in `child_arc`, if any. `None` means the
@@ -366,7 +375,7 @@ fn kill_and_reap(child_arc: &Arc<Mutex<Option<Child>>>) -> Option<Option<i32>> {
     // stop can land before the watcher's next tick. Once reaped, the pid is
     // free for the OS to reuse, so signalling its process group could hit an
     // unrelated process. `Child::kill` guards itself against that; the
-    // `kill(1)` group kill cannot, so skip both when the child is known
+    // group kill cannot, so skip both when the child is known
     // gone. `wait()` below then just returns the cached status.
     if !matches!(child.try_wait(), Ok(Some(_))) {
         #[cfg(unix)]
@@ -663,5 +672,106 @@ mod tests {
         assert_eq!(events[0].1["running"], false);
         assert_eq!(events[0].1["exitCode"], 0);
         assert!(!entry_present(&manager, "inst", ProcessRole::Server));
+    }
+
+    /// Kills a leftover sleeper if a test fails before its group is
+    /// signalled, so a failing run leaves nothing behind.
+    #[cfg(unix)]
+    struct KillOnDrop(Option<libc::pid_t>);
+
+    #[cfg(unix)]
+    impl Drop for KillOnDrop {
+        fn drop(&mut self) {
+            if let Some(pid) = self.0.filter(|pid| *pid > 0) {
+                // SAFETY: kill(2) has no memory-safety preconditions; `pid`
+                // is positive, so only that one process is addressed.
+                unsafe {
+                    libc::kill(pid, libc::SIGKILL);
+                }
+            }
+        }
+    }
+
+    /// True once `pid` no longer exists or is a zombie awaiting its reaper.
+    #[cfg(unix)]
+    fn process_gone(pid: libc::pid_t) -> bool {
+        match std::fs::read_to_string(format!("/proc/{pid}/status")) {
+            Err(_) => true,
+            Ok(status) => status
+                .lines()
+                .any(|line| line.starts_with("State:") && line.contains('Z')),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_kills_the_grandchild_in_the_process_group() {
+        use std::os::unix::process::CommandExt;
+
+        let dir =
+            std::env::temp_dir().join(format!("nerevar-state-group-kill-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let pid_file = dir.join("sleeper.pid");
+
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg("sleep 300 & echo $! > \"$1\"; wait")
+            .arg("sh")
+            .arg(&pid_file)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .process_group(0);
+        let child = command.spawn().expect("spawn wrapper");
+        let mut wrapper_guard = KillOnDrop(libc::pid_t::try_from(child.id()).ok());
+
+        let manager = ProcessManager::new();
+        manager
+            .insert("inst", ProcessRole::Server, child)
+            .expect("insert");
+
+        let start = Instant::now();
+        let sleeper: libc::pid_t = loop {
+            if let Some(pid) = std::fs::read_to_string(&pid_file)
+                .ok()
+                .and_then(|text| text.trim().parse().ok())
+            {
+                break pid;
+            }
+            assert!(
+                start.elapsed() < DEADLINE,
+                "the wrapper never wrote its sleeper's pid"
+            );
+            thread::sleep(Duration::from_millis(10));
+        };
+        let _sleeper_guard = KillOnDrop(Some(sleeper));
+        assert!(!process_gone(sleeper), "the sleeper should be running");
+
+        assert!(manager
+            .stop_blocking(None, "inst", ProcessRole::Server)
+            .expect("stop_blocking"));
+        // stop_blocking reaped the wrapper; its pid may be reused from here.
+        wrapper_guard.0 = None;
+
+        let start = Instant::now();
+        while !process_gone(sleeper) {
+            assert!(
+                start.elapsed() < Duration::from_secs(2),
+                "the grandchild {sleeper} survived the stop"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// pid 0 must not reach kill(2): `kill(0, SIGKILL)` would take down this
+    /// test binary's own process group. Surviving the call is the assertion.
+    #[cfg(unix)]
+    #[test]
+    fn the_group_kill_ignores_pid_zero() {
+        kill_process_group(0);
+        kill_process_group(u32::MAX);
     }
 }
