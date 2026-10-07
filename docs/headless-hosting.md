@@ -555,6 +555,11 @@ takes a hostname or IP. When the address is a URL the sync port field is
 ignored: the URL carries its own port, explicitly
 (`https://mw.example.org:8443`) or by its scheme.
 
+A bare hostname works too: the app and `nerevar-cli` try it on the sync port
+first and, only if nothing answers there, once more as `https://<hostname>`
+on port 443, then keep whichever address answered. A full URL skips that
+guess, and is the only way to reach a proxy on another port or under a path.
+
 Only the *sync* port is ever HTTPS. TES3MP is UDP straight to the game port, so
 that port stays open on the host and is reached by hostname; Nerevar derives
 that hostname from the URL for you.
