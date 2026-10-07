@@ -20,6 +20,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # DIAGNOSTIC: does this runner's kill(1) honour `kill -KILL -<pgid>`,
+      # the form nerevar-core shells out to? Run in a throwaway session so a
+      # kill(1) that signals its own process group instead takes only that
+      # session with it. The sleeper sits in its own group and must die.
+      - name: What kill -KILL -<pgid> does here
+        run: |
+          /usr/bin/kill --version || true
+          dpkg -s procps | grep '^Version' || true
+          setsid -w bash -c '
+            setsid sleep 300 & t=$!; sleep 0.3
+            /usr/bin/kill -KILL -$t; echo "kill rc=$?"; sleep 0.5
+            if kill -0 $t 2>/dev/null; then
+              echo "sleeper $t ALIVE: the group kill did not reach it"
+              /usr/bin/kill -KILL -- -$t; sleep 0.3
+              kill -0 $t 2>/dev/null && echo "still alive after the -- form" || echo "dead after the -- form"
+            else
+              echo "sleeper dead: the group kill worked"
+            fi'
+          echo "probe session exit=$?  (137 means kill(1) killed its own process group)"
+
       # Everything the Tauri crate links against. The daemon and the CLI need
       # none of it, but the workspace builds as a unit.
       - name: Install Linux build dependencies
