@@ -16,6 +16,7 @@ jobs:
   rust:
     name: cargo check / test / clippy
     runs-on: ubuntu-22.04
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -52,7 +53,22 @@ jobs:
       - run: cargo check --workspace
         working-directory: src-tauri
 
-      - run: cargo test --workspace
+      # Building and running the tests are separate steps so that a runner
+      # lost mid-way (GitHub's "lost communication with the server", which
+      # leaves no log for the step in flight) still says which phase died,
+      # and the step between records what the build left for the tests.
+      - name: Build the tests
+        run: cargo test --workspace --no-run
+        working-directory: src-tauri
+
+      - name: Disk and memory after the build
+        run: |
+          df -h /
+          du -sh src-tauri/target
+          free -m
+
+      - name: Run the tests
+        run: cargo test --workspace
         working-directory: src-tauri
 
       - run: cargo clippy --workspace --all-targets
@@ -61,6 +77,7 @@ jobs:
   windows-cross-check:
     name: cargo check (windows target)
     runs-on: ubuntu-22.04
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -92,6 +109,7 @@ jobs:
   frontend:
     name: pnpm typecheck
     runs-on: ubuntu-22.04
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
