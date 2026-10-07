@@ -43,6 +43,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
 
       # ts-rs writes the TypeScript bindings during `cargo test`, and the
       # frontend typecheck below reads them, so the Rust job runs first and
@@ -99,6 +100,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
           key: windows-gnu
 
       # Compiles the cfg(windows) code the Linux checks skip — the in-app
@@ -128,6 +130,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
           key: bindings
 
       - uses: pnpm/action-setup@v4
