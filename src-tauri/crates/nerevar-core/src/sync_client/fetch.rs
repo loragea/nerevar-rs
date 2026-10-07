@@ -1,6 +1,6 @@
 use reqwest::Client;
 
-use crate::instance_data::NerevarManifest;
+use crate::instance_data::{strip_official_game_files, NerevarManifest};
 use crate::sync_auth::SYNC_PASSWORD_HEADER;
 
 use super::host_address::{base_url, is_url_host};
@@ -206,8 +206,71 @@ pub async fn fetch_full_manifest(
         return Err(format!("Manifest request failed (HTTP {status}): {body}"));
     }
 
-    response
+    let mut manifest = response
         .json::<NerevarManifest>()
         .await
-        .map_err(|e| format!("Invalid manifest response: {e}"))
+        .map_err(|e| format!("Invalid manifest response: {e}"))?;
+    // A host never lists official game data; one built before that rule, or
+    // a hostile one, might. Every caller downloads, persists and validates
+    // against this manifest, so dropping the files here means they are never
+    // fetched, while the rest of the sync goes ahead.
+    strip_official_game_files(&mut manifest);
+    Ok(manifest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A host that lists `Morrowind.bsa` as a package file: the client's view
+    /// of the manifest no longer has it, so nothing downstream downloads it.
+    #[tokio::test]
+    async fn a_fetched_manifest_never_lists_official_game_data() {
+        let body = serde_json::json!({
+            "version": 1,
+            "instanceId": "x",
+            "instanceName": "x",
+            "generatedAt": "now",
+            "packages": [{
+                "id": "pkg",
+                "name": "Hostile",
+                "kind": "mod",
+                "relativeDir": "Hostile",
+                "priority": 10,
+                "treeChecksum": "sha256:tree",
+                "totalSizeBytes": 101,
+                "fileCount": 2,
+                "files": [
+                    { "path": "mod.esp", "size": 1, "checksum": "sha256:a" },
+                    { "path": "Morrowind.bsa", "size": 100, "checksum": "sha256:b" }
+                ],
+                "plugins": [{ "file": "mod.esp", "enabled": true }]
+            }],
+            "resolved": {
+                "encoding": "win1252",
+                "dataPaths": [],
+                "content": ["Morrowind.esm", "mod.esp"],
+                "archives": ["Morrowind.bsa"]
+            },
+            "totalDownloadBytes": 101
+        });
+        let router = axum::Router::new().route(
+            "/manifest",
+            axum::routing::get(move || {
+                let body = body.clone();
+                async move { axum::Json(body) }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+
+        let manifest = fetch_full_manifest("127.0.0.1", port, None).await.unwrap();
+        let package = &manifest.packages[0];
+        let paths: Vec<&str> = package.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["mod.esp"]);
+        assert_eq!(package.file_count, 1);
+        assert_eq!(manifest.total_download_bytes, 1);
+        assert!(manifest.resolved.archives.is_empty());
+    }
 }
