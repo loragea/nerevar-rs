@@ -2,9 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::importer::{
-    apply_morrowind_ini_import, build_default_morrowind_ini, cfg_to_string, load_cfg_file,
-    parse_cfg_contents, quote_data_path, resolve_morrowind_ini, ImportOptions, IniEncoding,
-    MultiStrMap,
+    append_present_base_archives, apply_morrowind_ini_import, build_default_morrowind_ini,
+    cfg_to_string, first_data_path, load_cfg_file, parse_cfg_contents, quote_data_path,
+    resolve_morrowind_ini, ImportOptions, IniEncoding, MultiStrMap,
 };
 use super::settings_merge::{merge_settings_overlay, merge_user_session_changes};
 
@@ -382,11 +382,27 @@ pub fn read_first_global_data_path() -> Option<String> {
 fn compose_active_openmw_cfg(nerevar_base: &str, launch_overlay: &str) -> String {
     let base = parse_cfg_contents(nerevar_base);
     let launch = parse_cfg_contents(launch_overlay);
-    let merged = merge_launch_overlay(base, launch);
+    let mut merged = merge_launch_overlay(base, launch);
+    ensure_base_game_archives(&mut merged);
 
     let mut out = String::from("# Nerevar active OpenMW config (managed during TES3MP launch)\n");
     out.push_str(&cfg_to_string(&merged));
     out
+}
+
+/// Repair configs imported before the base-archive rule existed: register any
+/// of the three base-game archives that sit in the first `data=` directory but
+/// are missing from `fallback-archive`. Never reorders or removes entries.
+fn ensure_base_game_archives(cfg: &mut MultiStrMap) {
+    let Some(data_dir) = first_data_path(cfg) else {
+        return;
+    };
+    let mut archives = cfg.get("fallback-archive").cloned().unwrap_or_default();
+    let before = archives.len();
+    append_present_base_archives(&mut archives, &data_dir);
+    if archives.len() != before {
+        cfg.insert("fallback-archive".to_string(), archives);
+    }
 }
 
 fn merge_launch_overlay(mut base: MultiStrMap, launch: MultiStrMap) -> MultiStrMap {
@@ -561,6 +577,71 @@ mod tests {
             "encoding=win1252\n"
         );
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+    fn archive_compose_dir(name: &str, bsas: &[&str]) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("nerevar-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let data_files = dir.join("Data Files");
+        fs::create_dir_all(&data_files).unwrap();
+        for bsa in bsas {
+            fs::write(data_files.join(bsa), b"BSA").unwrap();
+        }
+        dir
+    }
+
+    fn composed_archives(composed: &str) -> Vec<String> {
+        parse_cfg_contents(composed)
+            .get("fallback-archive")
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn compose_adds_expansion_archives_present_in_base_data_dir() {
+        let dir = archive_compose_dir(
+            "compose-archives-missing",
+            &["Morrowind.bsa", "Tribunal.bsa", "Bloodmoon.bsa"],
+        );
+        let base = format!(
+            "data={}\nfallback-archive=Morrowind.bsa\n",
+            quote_data_path(&dir.join("Data Files"))
+        );
+        let composed = compose_active_openmw_cfg(&base, "content=Morrowind.esm");
+        assert_eq!(
+            composed_archives(&composed),
+            vec!["Morrowind.bsa", "Tribunal.bsa", "Bloodmoon.bsa"]
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compose_leaves_complete_archive_list_unchanged() {
+        let dir = archive_compose_dir(
+            "compose-archives-complete",
+            &["Morrowind.bsa", "Tribunal.bsa", "Bloodmoon.bsa"],
+        );
+        let base = format!(
+            "data={}\nfallback-archive=Morrowind.bsa\nfallback-archive=Bloodmoon.bsa\nfallback-archive=tribunal.bsa\n",
+            quote_data_path(&dir.join("Data Files"))
+        );
+        let composed = compose_active_openmw_cfg(&base, "content=Morrowind.esm");
+        assert_eq!(
+            composed_archives(&composed),
+            vec!["Morrowind.bsa", "Bloodmoon.bsa", "tribunal.bsa"]
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn compose_adds_nothing_when_only_morrowind_bsa_exists() {
+        let dir = archive_compose_dir("compose-archives-vanilla", &["Morrowind.bsa"]);
+        let base = format!(
+            "data={}\nfallback-archive=Morrowind.bsa\n",
+            quote_data_path(&dir.join("Data Files"))
+        );
+        let composed = compose_active_openmw_cfg(&base, "content=Morrowind.esm");
+        assert_eq!(composed_archives(&composed), vec!["Morrowind.bsa"]);
         let _ = fs::remove_dir_all(&dir);
     }
 }
