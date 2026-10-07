@@ -46,6 +46,7 @@ export * from "./ScannedPackage";
 export * from "./RequiredDataFileEntry";
 export * from "./RemoteManifestSummary";
 export * from "./RemotePackageSummary";
+export * from "./ResolvedAddress";
 export * from "./SyncPhase";
 export * from "./SyncProgressEvent";
 export * from "./InstanceSyncStatus";

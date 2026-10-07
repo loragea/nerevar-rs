@@ -42,7 +42,9 @@ use nerevar_core::reporter::CollectingEventSink;
 use nerevar_core::runtime::{RuntimeHint, RuntimeSource};
 use nerevar_core::sync_auth::SYNC_PASSWORD_HEADER;
 use nerevar_core::sync_client::download::{download_manifest_files, DownloadOutcome};
-use nerevar_core::sync_client::{fetch_full_manifest, fetch_manifest_summary};
+use nerevar_core::sync_client::{
+    fetch_full_manifest, fetch_manifest_summary, resolve_reachable_address,
+};
 use nerevar_core::sync_host::{new_shared_hosting_manifest_cache, new_shared_sync_host};
 
 /// Sync password used to exercise the auth path end to end. Distinct from the (empty)
@@ -194,6 +196,19 @@ async fn host_client_sync_roundtrip() {
         .expect("authorized summary");
     assert_eq!(summary.package_count, 2);
     assert!(summary.password_required);
+
+    // The join flow's first contact: a bare host that answers on the sync port
+    // is kept as typed (no HTTPS retry), and the summary comes back with it.
+    let resolved = resolve_reachable_address(host, port, Some(SYNC_PASSWORD))
+        .await
+        .expect("a reachable bare host resolves");
+    assert_eq!(resolved.host, host);
+    assert_eq!(resolved.summary.package_count, 2);
+    // A 401 on the summary is reported as before, not retried over HTTPS.
+    assert_eq!(
+        resolve_reachable_address(host, port, None).await.unwrap_err(),
+        "Sync password required or incorrect"
+    );
     assert_eq!(summary.total_download_bytes, expected_total_bytes);
     // The advertised runtime reaches the client through the summary, intact.
     assert_eq!(
