@@ -35,6 +35,7 @@ import type {
   MorrowindCandidateSource,
   NewConnectionConfig,
   RemoteManifestSummary,
+  ResolvedAddress,
   RuntimeSource,
 } from "@/types";
 import { invoke } from "@tauri-apps/api/core";
@@ -568,19 +569,18 @@ function JoinConnectStep({
     setError(null);
     setPhase("connecting");
     try {
-      const remoteHost = host.trim();
-      await invoke("ping_remote_nerevar_server", {
-        remoteHost,
-        remoteSyncPort: syncPort,
-      });
-      const remoteSummary = await invoke<RemoteManifestSummary>(
-        "fetch_remote_manifest_summary",
+      // The backend may have reached a bare host only over HTTPS: the field
+      // then shows (and the join stores) the address that answered.
+      const resolved = await invoke<ResolvedAddress>(
+        "resolve_remote_nerevar_address",
         {
-          remoteHost,
+          remoteHost: host.trim(),
           remoteSyncPort: syncPort,
           syncPassword: password || null,
         },
       );
+      const remoteSummary = resolved.summary;
+      setHost(resolved.host);
       setSummary(remoteSummary);
 
       const hint = await resolveHostRuntimeHint(remoteSummary);
