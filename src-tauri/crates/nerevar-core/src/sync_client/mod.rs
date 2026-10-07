@@ -14,7 +14,9 @@ pub use apply::apply_manifest_to_load_order;
 pub use coordinator::SyncCoordinator;
 pub use fetch::{fetch_full_manifest, fetch_manifest_summary, ping_nerevar_server};
 pub use host_address::{base_url, game_host, is_url_host};
-pub use resolve::{resolve_reachable_address, resolve_reachable_host, ResolvedAddress};
+pub use resolve::{
+    refresh_instance_host, resolve_reachable_address, resolve_reachable_host, ResolvedAddress,
+};
 pub use metadata::{apply_manifest_metadata, write_synced_client_connection};
 pub use sync::{run_instance_sync, sync_if_needed, touch_last_synced};
 pub use types::*;

@@ -18,8 +18,9 @@ use crate::process_manager::{
 };
 use crate::reporter::{emit_event, EventSink, TauriEventSink};
 use crate::sync_client::{
-    game_host, resolve_reachable_address, run_instance_sync, sync_if_needed, touch_last_synced,
-    write_synced_client_connection, ResolvedAddress, SyncCoordinator, SyncOutcome,
+    game_host, refresh_instance_host, resolve_reachable_address, run_instance_sync, sync_if_needed,
+    touch_last_synced, write_synced_client_connection, ResolvedAddress, SyncCoordinator,
+    SyncOutcome,
 };
 use crate::AppState;
 use nerevar_core::config::nerevar_config::{
@@ -164,9 +165,10 @@ pub async fn sync_instance_from_remote(
     coordinator: State<'_, Arc<SyncCoordinator>>,
     instance_id: String,
 ) -> Result<SyncOutcome, String> {
-    let (instance, trusted) = resolve_instance_and_trust(&state, &instance_id)?;
+    let (mut instance, trusted) = resolve_instance_and_trust(&state, &instance_id)?;
 
     let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app));
+    refresh_stored_host(&state, &*sink, &mut instance).await?;
     let outcome = run_instance_sync(
         sink.clone(),
         coordinator.inner().clone(),
@@ -185,6 +187,21 @@ pub async fn sync_instance_from_remote(
     }
 
     Ok(outcome)
+}
+
+/// Resolves a synced instance's stored host the way the join flow resolves a
+/// typed one (see `refresh_instance_host`) and saves the new address when it
+/// changed, so a bare host that moved behind an HTTPS proxy keeps syncing.
+async fn refresh_stored_host(
+    state: &State<'_, Mutex<AppState>>,
+    sink: &dyn EventSink,
+    instance: &mut crate::data::InstanceConfig,
+) -> Result<(), String> {
+    if refresh_instance_host(instance).await? {
+        let config = update_synced_instance(state.inner(), instance.clone())?;
+        emit_event(sink, "on_config_change", &config);
+    }
+    Ok(())
 }
 
 /// The instance a command was pointed at, plus the trust list that decides
@@ -277,11 +294,12 @@ pub async fn launch_instance_client(
     instance_id: String,
     allow_runtime_mismatch: Option<bool>,
 ) -> Result<(), String> {
-    let (instance, trusted) = resolve_instance_and_trust(&state, &instance_id)?;
+    let (mut instance, trusted) = resolve_instance_and_trust(&state, &instance_id)?;
 
     let sink: Arc<dyn EventSink> = Arc::new(TauriEventSink::new(app));
 
     if instance.remote_host.is_some() {
+        refresh_stored_host(&state, &*sink, &mut instance).await?;
         let outcome = sync_if_needed(
             sink.clone(),
             coordinator.inner().clone(),

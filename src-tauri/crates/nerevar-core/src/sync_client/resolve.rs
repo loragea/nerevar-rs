@@ -20,6 +20,8 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::data::InstanceConfig;
+
 use super::fetch::{fetch_manifest_summary, probe_ping, ProbeError};
 use super::host_address::{base_url, is_url_host};
 use super::types::RemoteManifestSummary;
@@ -73,6 +75,44 @@ pub async fn resolve_reachable_address(
     let host = resolve_reachable_host(host, port).await?;
     let summary = fetch_manifest_summary(&host, port, sync_password).await?;
     Ok(ResolvedAddress { host, summary })
+}
+
+/// Applies the join flow's rule to a synced instance's *stored* host before a
+/// sync: resolves `remote_host` on `remote_sync_port` and, when a different
+/// address answered (a bare host now only reachable at `https://{host}`),
+/// writes it into `instance.remote_host`.
+///
+/// Returns whether the host changed, so the caller saves the instance its own
+/// way. Fails with the resolver's error when nothing answers in either form,
+/// so the sync stops there rather than going on with an address that did not
+/// answer. An instance missing its host or port is left alone (`Ok(false)`):
+/// the sync itself reports what is missing.
+pub async fn refresh_instance_host(instance: &mut InstanceConfig) -> Result<bool, String> {
+    refresh_instance_host_with(instance, |host, port| async move {
+        resolve_reachable_host(&host, port).await
+    })
+    .await
+}
+
+/// [`refresh_instance_host`] with the resolver injected, for tests.
+async fn refresh_instance_host_with<R, F>(
+    instance: &mut InstanceConfig,
+    resolve: R,
+) -> Result<bool, String>
+where
+    R: FnOnce(String, u16) -> F,
+    F: Future<Output = Result<String, String>>,
+{
+    let (Some(host), Some(port)) = (instance.remote_host.clone(), instance.remote_sync_port) else {
+        return Ok(false);
+    };
+    let resolved = resolve(host.clone(), port).await?;
+    if resolved == host {
+        return Ok(false);
+    }
+    log::info!("{host} did not answer on port {port}; saving {resolved} as its address");
+    instance.remote_host = Some(resolved);
+    Ok(true)
 }
 
 /// The decision behind [`resolve_reachable_host`], with the ping injected so
@@ -246,6 +286,100 @@ mod tests {
         assert_eq!(https_fallback("[::1]").as_deref(), Some("https://[::1]"));
         assert_eq!(https_fallback("http://mw.example.org"), None);
         assert_eq!(https_fallback("https://mw.example.org"), None);
+    }
+
+    // ---- refreshing a stored instance's host --------------------------------------
+
+    fn synced_instance(host: Option<&str>, port: Option<u16>) -> InstanceConfig {
+        InstanceConfig {
+            id: "synced".into(),
+            name: "Synced".into(),
+            description: String::new(),
+            path: String::new(),
+            data_dir: String::new(),
+            release_id: None,
+            runtime: None,
+            runtime_hint: None,
+            remote_host: host.map(str::to_string),
+            remote_sync_port: port,
+            last_synced_at: None,
+            tes3mp_server_port: None,
+            sync_password: None,
+        }
+    }
+
+    /// Runs [`refresh_instance_host_with`] through the real decision
+    /// ([`resolve_host_with`]) with a scripted prober.
+    async fn refresh_scripted(
+        instance: &mut InstanceConfig,
+        script: Vec<(&'static str, Result<(), ProbeError>)>,
+    ) -> (Calls, Result<bool, String>) {
+        let (calls, probe) = scripted(script);
+        let result = refresh_instance_host_with(instance, |host, port| async move {
+            resolve_host_with(&host, port, probe).await
+        })
+        .await;
+        (calls, result)
+    }
+
+    #[tokio::test]
+    async fn a_stored_bare_host_only_reachable_over_https_is_rewritten() {
+        let mut instance = synced_instance(Some("mw.example.org"), Some(25567));
+        let (_, result) = refresh_scripted(
+            &mut instance,
+            vec![
+                ("mw.example.org", Err(unreachable("Connection refused"))),
+                ("https://mw.example.org", Ok(())),
+            ],
+        )
+        .await;
+        assert_eq!(result, Ok(true));
+        assert_eq!(
+            instance.remote_host.as_deref(),
+            Some("https://mw.example.org")
+        );
+        assert_eq!(instance.remote_sync_port, Some(25567));
+    }
+
+    #[tokio::test]
+    async fn a_stored_host_that_answers_is_left_unchanged() {
+        for host in ["192.168.1.5", "https://mw.example.org"] {
+            let mut instance = synced_instance(Some(host), Some(25567));
+            let (calls, result) = refresh_scripted(&mut instance, vec![(host, Ok(()))]).await;
+            assert_eq!(result, Ok(false));
+            assert_eq!(instance.remote_host.as_deref(), Some(host));
+            assert_eq!(*calls.lock().unwrap(), [host]);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_stored_host_that_answers_nowhere_fails_and_is_left_unchanged() {
+        let mut instance = synced_instance(Some("mw.example.org"), Some(25567));
+        let (_, result) = refresh_scripted(
+            &mut instance,
+            vec![
+                ("mw.example.org", Err(unreachable("Connection refused"))),
+                ("https://mw.example.org", Err(unreachable("dns error"))),
+            ],
+        )
+        .await;
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("could not connect to http://mw.example.org:25567"),
+            "unexpected message: {err}"
+        );
+        assert_eq!(instance.remote_host.as_deref(), Some("mw.example.org"));
+    }
+
+    #[tokio::test]
+    async fn an_instance_without_a_host_or_port_is_not_probed() {
+        for (host, port) in [(None, Some(25567)), (Some("mw.example.org"), None)] {
+            let mut instance = synced_instance(host, port);
+            let (calls, result) = refresh_scripted(&mut instance, vec![]).await;
+            assert_eq!(result, Ok(false));
+            assert_eq!(instance.remote_host.as_deref(), host);
+            assert!(calls.lock().unwrap().is_empty());
+        }
     }
 
     // ---- the real ping against local servers --------------------------------------
