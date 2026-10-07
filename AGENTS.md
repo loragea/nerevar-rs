@@ -86,7 +86,12 @@ repo root (see below) — not `src-tauri/bindings/`, which no longer exists.
   compiles it).
   Every crate inherits its version from `[workspace.package]` in
   `src-tauri/Cargo.toml`; bump it there (and in `package.json` and
-  `src-tauri/tauri.conf.json`, which are separate).
+  `src-tauri/tauri.conf.json`, which are separate). The tree's version is
+  always a plain `X.Y.Z`.
+- Releasing: push a tag. `vX.Y.Z` publishes a release, `vX.Y.Z-<suffix>`
+  (`v0.2.0-rc`, `v0.2.0-rc.2`) a prerelease of the same tree, which the
+  in-app updater ignores. Either way `X.Y.Z` must equal the tree's version
+  or `.github/workflows/release.yml` stops before building.
 - `cargo build --release -p nerevar-host` — just the headless daemon; needs no
   Node/Tauri toolchain, which is the point on a server.
 - `cargo build --release -p nerevar-cli` — just the command-line client; same

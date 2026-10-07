@@ -15,11 +15,21 @@ jobs:
   # (src-tauri/src/app_update.rs parses the semver out of it), so a tag that
   # disagrees with the version in the tree would ship an update that never
   # settles. Fail here rather than after two long builds.
+  #
+  # Two tag shapes are accepted, both against a tree at X.Y.Z:
+  #   vX.Y.Z           a release
+  #   vX.Y.Z-<suffix>  a prerelease of X.Y.Z (v0.2.0-rc, v0.2.0-rc.2, ...),
+  #                    published with the prerelease flag, which the updater
+  #                    skips; the bundles still carry X.Y.Z. The tree's version
+  #                    never takes a suffix: the updater reads its own version
+  #                    as a plain numeric triple, and Tauri's MSI bundler
+  #                    rejects a non-numeric pre-release identifier.
   verify-version:
     name: Tag matches the tree
     runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.check.outputs.version }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
 
@@ -27,18 +37,24 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME#v}"
+          core="${tag%%-*}"
+          prerelease=false
+          if [ "$core" != "$tag" ]; then
+            prerelease=true
+          fi
           conf=$(node -p "require('./src-tauri/tauri.conf.json').version")
           pkg=$(node -p "require('./package.json').version")
           cargo_version=$(sed -n '/^\[workspace\.package\]/,/^\[/p' src-tauri/Cargo.toml |
             sed -n 's/^version *= *"\(.*\)"/\1/p' | head -1)
-          echo "tag=$tag tauri.conf.json=$conf package.json=$pkg Cargo.toml=$cargo_version"
+          echo "tag=$tag core=$core prerelease=$prerelease tauri.conf.json=$conf package.json=$pkg Cargo.toml=$cargo_version"
           for v in "$conf" "$pkg" "$cargo_version"; do
-            if [ "$v" != "$tag" ]; then
+            if [ "$v" != "$core" ]; then
               echo "::error::version mismatch: tag $tag, tree $conf/$pkg/$cargo_version" >&2
               exit 1
             fi
           done
-          echo "version=$tag" >>"$GITHUB_OUTPUT"
+          echo "version=$core" >>"$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >>"$GITHUB_OUTPUT"
 
   linux:
     name: Linux bundles
@@ -183,10 +199,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.verify-version.outputs.version }}
+          PRERELEASE: ${{ needs.verify-version.outputs.prerelease }}
         run: |
           set -euo pipefail
+          flags=()
+          if [ "$PRERELEASE" = true ]; then
+            flags+=(--prerelease)
+          fi
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Nerevar v${VERSION}" \
+            --title "Nerevar ${GITHUB_REF_NAME}" \
             --generate-notes \
+            "${flags[@]}" \
             dist/*
