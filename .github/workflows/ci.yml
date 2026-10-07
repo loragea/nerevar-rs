@@ -43,6 +43,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
 
       # ts-rs writes the TypeScript bindings during `cargo test`, and the
       # frontend typecheck below reads them, so the Rust job runs first and
@@ -66,6 +67,14 @@ jobs:
           df -h /
           du -sh src-tauri/target
           free -m
+
+      # DIAGNOSTIC (remove once the lost runner is explained): the runner has
+      # died during nerevar-core's unit tests on every run so far. One thread
+      # makes the order exact, so the last line printed before the runner
+      # goes names the test that preceded the killer.
+      - name: Core unit tests, one at a time
+        run: cargo test -p nerevar-core --lib -- --test-threads=1
+        working-directory: src-tauri
 
       - name: Run the tests
         run: cargo test --workspace
@@ -99,6 +108,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
           key: windows-gnu
 
       # Compiles the cfg(windows) code the Linux checks skip — the in-app
@@ -128,6 +138,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
           key: bindings
 
       - uses: pnpm/action-setup@v4
