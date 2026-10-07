@@ -132,7 +132,8 @@ pub fn apply_morrowind_ini_import(
     }
 
     if options.import_archives {
-        import_archives(&mut cfg, ini);
+        let data_dir = first_data_path(&cfg);
+        import_archives(&mut cfg, ini, data_dir.as_deref());
     }
 
     if let Some(parent) = openmw_cfg.parent() {
@@ -253,7 +254,7 @@ fn merge_fallback(cfg: &mut MultiStrMap, ini: &MultiStrMap) {
     }
 }
 
-fn import_archives(cfg: &mut MultiStrMap, ini: &MultiStrMap) {
+fn import_archives(cfg: &mut MultiStrMap, ini: &MultiStrMap, data_dir: Option<&Path>) {
     let mut archives = Vec::new();
     let base = "Archives:Archive ";
 
@@ -271,8 +272,60 @@ fn import_archives(cfg: &mut MultiStrMap, ini: &MultiStrMap) {
         vec!["Morrowind.bsa".to_string()],
     );
     if let Some(entry) = cfg.get_mut("fallback-archive") {
-        entry.extend(archives);
+        for archive in archives {
+            if !entry
+                .iter()
+                .any(|listed| listed.trim().eq_ignore_ascii_case(archive.trim()))
+            {
+                entry.push(archive);
+            }
+        }
+        if let Some(data_dir) = data_dir {
+            append_present_base_archives(entry, data_dir);
+        }
     }
+}
+
+/// The archives that ship with Morrowind and its two expansions, in load order.
+const BASE_GAME_ARCHIVES: &[&str] = &["Morrowind.bsa", "Tribunal.bsa", "Bloodmoon.bsa"];
+
+/// Append to `archives` each of `Morrowind.bsa`, `Tribunal.bsa` and `Bloodmoon.bsa`
+/// that exists as a file in `data_dir` and is not already listed.
+///
+/// Both the on-disk lookup and the duplicate check ignore ASCII case, so a
+/// lowercase `tribunal.bsa` on a case-sensitive filesystem is still found; the
+/// file's on-disk name is what gets appended. Existing entries keep their order.
+/// A `Morrowind.ini` that names only `Archive 0=Morrowind.bsa` would otherwise
+/// leave the expansions' meshes and textures unloaded although their ESMs load.
+pub(super) fn append_present_base_archives(archives: &mut Vec<String>, data_dir: &Path) {
+    let Ok(entries) = fs::read_dir(data_dir) else {
+        return;
+    };
+    let files: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect();
+
+    for archive in BASE_GAME_ARCHIVES {
+        if archives
+            .iter()
+            .any(|listed| listed.trim().eq_ignore_ascii_case(archive))
+        {
+            continue;
+        }
+        if let Some(on_disk) = files.iter().find(|name| name.eq_ignore_ascii_case(archive)) {
+            archives.push(on_disk.clone());
+        }
+    }
+}
+
+/// The first `data=` entry of an OpenMW config, with surrounding quotes removed.
+pub(super) fn first_data_path(cfg: &MultiStrMap) -> Option<PathBuf> {
+    let first = cfg.get("data")?.first()?;
+    let mut paths = Vec::new();
+    add_paths(&mut paths, std::slice::from_ref(first));
+    paths.pop()
 }
 
 fn import_game_files(
@@ -651,9 +704,127 @@ mod tests {
             vec!["Tribunal.bsa".to_string()],
         );
         let mut cfg = MultiStrMap::new();
-        import_archives(&mut cfg, &ini);
+        import_archives(&mut cfg, &ini, None);
         let archives = cfg.get("fallback-archive").unwrap();
         assert_eq!(archives[0], "Morrowind.bsa");
         assert!(archives.contains(&"Tribunal.bsa".to_string()));
+    }
+    fn archive_test_dir(name: &str, bsas: &[&str]) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("nerevar-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        for bsa in bsas {
+            fs::write(dir.join(bsa), b"BSA").unwrap();
+        }
+        dir
+    }
+
+    fn ini_with_archives(archives: &[&str]) -> MultiStrMap {
+        let mut ini = MultiStrMap::new();
+        for (index, archive) in archives.iter().enumerate() {
+            ini.insert(
+                format!("Archives:Archive {index}"),
+                vec![(*archive).to_string()],
+            );
+        }
+        ini
+    }
+
+    #[test]
+    fn import_adds_expansion_archives_the_ini_omits() {
+        let dir = archive_test_dir("archives-omitted", &[]);
+        let data_files = dir.join("Data Files");
+        fs::create_dir_all(&data_files).unwrap();
+        for bsa in ["Morrowind.bsa", "Tribunal.bsa", "Bloodmoon.bsa"] {
+            fs::write(data_files.join(bsa), b"BSA").unwrap();
+        }
+        let cfg_path = dir.join("openmw.nerevar.cfg");
+        let mut seed = MultiStrMap::new();
+        seed.insert("data".to_string(), vec![quote_data_path(&data_files)]);
+
+        apply_morrowind_ini_import(
+            &ini_with_archives(&["Morrowind.bsa"]),
+            &cfg_path,
+            seed,
+            ImportOptions {
+                encoding: IniEncoding::Win1252,
+                import_game_files: false,
+                import_archives: true,
+            },
+            &data_files,
+        )
+        .unwrap();
+
+        let cfg = load_cfg_file(&cfg_path).unwrap();
+        assert_eq!(
+            cfg.get("fallback-archive").unwrap(),
+            &vec![
+                "Morrowind.bsa".to_string(),
+                "Tribunal.bsa".to_string(),
+                "Bloodmoon.bsa".to_string()
+            ]
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn import_skips_expansion_archives_absent_on_disk() {
+        let dir = archive_test_dir("archives-absent", &["Morrowind.bsa", "Tribunal.bsa"]);
+        let mut cfg = MultiStrMap::new();
+        import_archives(&mut cfg, &ini_with_archives(&["Morrowind.bsa"]), Some(&dir));
+        assert_eq!(
+            cfg.get("fallback-archive").unwrap(),
+            &vec!["Morrowind.bsa".to_string(), "Tribunal.bsa".to_string()]
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn import_does_not_duplicate_archives_the_ini_lists() {
+        let dir = archive_test_dir(
+            "archives-complete",
+            &["Morrowind.bsa", "Tribunal.bsa", "Bloodmoon.bsa"],
+        );
+        let mut cfg = MultiStrMap::new();
+        import_archives(
+            &mut cfg,
+            &ini_with_archives(&["Morrowind.bsa", "Tribunal.bsa", "Bloodmoon.bsa"]),
+            Some(&dir),
+        );
+        assert_eq!(
+            cfg.get("fallback-archive").unwrap(),
+            &vec![
+                "Morrowind.bsa".to_string(),
+                "Tribunal.bsa".to_string(),
+                "Bloodmoon.bsa".to_string()
+            ]
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn import_matches_ini_archive_names_case_insensitively() {
+        let dir = archive_test_dir(
+            "archives-case",
+            &["Morrowind.bsa", "Tribunal.bsa", "Bloodmoon.bsa"],
+        );
+        let mut cfg = MultiStrMap::new();
+        import_archives(
+            &mut cfg,
+            &ini_with_archives(&["Morrowind.bsa", "tribunal.bsa"]),
+            Some(&dir),
+        );
+        let archives = cfg.get("fallback-archive").unwrap();
+        assert_eq!(
+            archives
+                .iter()
+                .filter(|name| name.eq_ignore_ascii_case("Tribunal.bsa"))
+                .count(),
+            1,
+            "got {archives:?}"
+        );
+        assert_eq!(archives.last().map(String::as_str), Some("Bloodmoon.bsa"));
+        let _ = fs::remove_dir_all(&dir);
     }
 }
