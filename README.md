@@ -134,7 +134,7 @@ ports) is covered in **[docs/headless-hosting.md](docs/headless-hosting.md)**.
 
 ## For players joining a server
 
-1. **Create a new connection** (synced instance) with the host’s address, Nerevar sync port, and sync password if required.
+1. **Create a new connection** (synced instance) with the host’s address, Nerevar sync port, and sync password if required. A bare hostname is tried on the sync port and then over `https://`; a full `https://` URL from the host skips that guess.
 2. **Wait for the initial sync** — first connect may take a while depending on mod list size.
 3. **Launch the client** from the instance page — Nerevar checks for updates, syncs if needed, then starts TES3MP.
 4. **Stay up to date** — use **Sync from host** or simply launch again after the host updates mods.

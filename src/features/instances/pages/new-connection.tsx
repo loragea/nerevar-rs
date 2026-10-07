@@ -19,7 +19,11 @@ import {
   resolveHostRuntimeHint,
   type HostRuntimeHint,
 } from "@/features/instances/lib/host-runtime-hint";
-import type { NewConnectionConfig, RemoteManifestSummary } from "@/types";
+import type {
+  NewConnectionConfig,
+  RemoteManifestSummary,
+  ResolvedAddress,
+} from "@/types";
 import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -112,18 +116,19 @@ export function NewConnectionPage() {
     setTesting(true);
     setPreview(null);
     try {
-      await invoke("ping_remote_nerevar_server", {
-        remoteHost: parsed.data.remoteHost,
-        remoteSyncPort: parsed.data.remoteSyncPort,
-      });
-      const summary = await invoke<RemoteManifestSummary>(
-        "fetch_remote_manifest_summary",
+      // The backend may have reached a bare host only over HTTPS: the field
+      // then shows (and the create stores) the address that answered.
+      const { host, summary } = await invoke<ResolvedAddress>(
+        "resolve_remote_nerevar_address",
         {
           remoteHost: parsed.data.remoteHost,
           remoteSyncPort: parsed.data.remoteSyncPort,
           syncPassword: parsed.data.syncPassword || null,
         },
       );
+      if (host !== parsed.data.remoteHost) {
+        form.setValue("remoteHost", host, { shouldValidate: true });
+      }
       setPreview(summary);
       await applyHostRuntimeHint(summary);
       toast.success(`Connected to ${summary.instanceName}`);

@@ -50,8 +50,52 @@ fn apply_sync_password(
 }
 
 pub async fn ping_nerevar_server(host: &str, port: u16) -> Result<(), String> {
-    let client = Client::new();
-    let base = base_url(host, port)?;
+    probe_ping(&Client::new(), host, port)
+        .await
+        .map_err(ProbeError::into_message)
+}
+
+/// Why a `/ping` did not succeed, split the way the bare-host HTTPS fallback
+/// in [`super::resolve`] needs it split.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProbeError {
+    /// Nothing answered: the connection was refused, the name did not
+    /// resolve, the TLS handshake failed, or the request timed out. The only
+    /// class of failure a retry at another address can fix.
+    Unreachable {
+        /// The single-attempt error, exactly as `ping_nerevar_server` words it.
+        message: String,
+        /// The innermost cause (e.g. "Connection refused (os error 111)"), for
+        /// the message that names both attempts.
+        cause: String,
+    },
+    /// Something answered, or the address itself is unusable: an HTTP status,
+    /// a malformed host. Never retried elsewhere.
+    Other(String),
+}
+
+impl ProbeError {
+    pub fn into_message(self) -> String {
+        match self {
+            ProbeError::Unreachable { message, .. } | ProbeError::Other(message) => message,
+        }
+    }
+}
+
+/// The innermost error in `err`'s source chain — the OS or TLS reason under
+/// reqwest's and hyper's wrappers.
+fn root_cause(err: &(dyn std::error::Error + 'static)) -> String {
+    let mut current = err;
+    while let Some(source) = current.source() {
+        current = source;
+    }
+    current.to_string()
+}
+
+/// `GET {base}/ping` with `client`, classifying a failure as [`ProbeError`].
+/// The messages are the ones `ping_nerevar_server` has always returned.
+pub(crate) async fn probe_ping(client: &Client, host: &str, port: u16) -> Result<(), ProbeError> {
+    let base = base_url(host, port).map_err(ProbeError::Other)?;
     let url = format!("{base}/ping");
     let response = client
         .get(&url)
@@ -59,19 +103,26 @@ pub async fn ping_nerevar_server(host: &str, port: u16) -> Result<(), String> {
         .send()
         .await
         .map_err(|e| {
-            connection_error(
+            let unreachable = e.is_connect() || e.is_timeout();
+            let cause = root_cause(&e);
+            let message = connection_error(
                 "Failed to reach Nerevar server",
                 &base,
                 port_hint(host, port),
                 e,
-            )
+            );
+            if unreachable {
+                ProbeError::Unreachable { message, cause }
+            } else {
+                ProbeError::Other(message)
+            }
         })?;
 
     if !response.status().is_success() {
-        return Err(format!(
+        return Err(ProbeError::Other(format!(
             "Nerevar server ping failed (HTTP {})",
             response.status()
-        ));
+        )));
     }
     Ok(())
 }

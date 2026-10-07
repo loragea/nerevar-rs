@@ -18,9 +18,8 @@ use crate::process_manager::{
 };
 use crate::reporter::{emit_event, EventSink, TauriEventSink};
 use crate::sync_client::{
-    fetch_manifest_summary, game_host, ping_nerevar_server, run_instance_sync, sync_if_needed,
-    touch_last_synced, write_synced_client_connection, RemoteManifestSummary, SyncCoordinator,
-    SyncOutcome,
+    game_host, resolve_reachable_address, run_instance_sync, sync_if_needed, touch_last_synced,
+    write_synced_client_connection, ResolvedAddress, SyncCoordinator, SyncOutcome,
 };
 use crate::AppState;
 use nerevar_core::config::nerevar_config::{
@@ -28,21 +27,17 @@ use nerevar_core::config::nerevar_config::{
 };
 use nerevar_core::runtime::{self, TargetPlatform, TrustedRuntimeRepos};
 
+/// The first contact the New Connection page and the join flow make: finds
+/// the address the host answers on — retrying a bare host over HTTPS when
+/// nothing listens on its sync port — and reads its manifest summary there.
+/// The returned `host` is what the form should show and submit.
 #[tauri::command]
-pub async fn ping_remote_nerevar_server(
-    remote_host: String,
-    remote_sync_port: u16,
-) -> Result<(), String> {
-    ping_nerevar_server(&remote_host, remote_sync_port).await
-}
-
-#[tauri::command]
-pub async fn fetch_remote_manifest_summary(
+pub async fn resolve_remote_nerevar_address(
     remote_host: String,
     remote_sync_port: u16,
     sync_password: Option<String>,
-) -> Result<RemoteManifestSummary, String> {
-    fetch_manifest_summary(&remote_host, remote_sync_port, sync_password.as_deref()).await
+) -> Result<ResolvedAddress, String> {
+    resolve_reachable_address(&remote_host, remote_sync_port, sync_password.as_deref()).await
 }
 
 /// The instance directory a connection with this name would get, for the
@@ -70,7 +65,7 @@ pub fn preview_connection_instance_path(
 #[tauri::command]
 pub async fn add_synced_connection(
     state: State<'_, Mutex<AppState>>,
-    new_connection: NewConnectionConfig,
+    mut new_connection: NewConnectionConfig,
     operation_id: Option<String>,
 ) -> Result<String, String> {
     let paths = instance_paths(
@@ -80,13 +75,16 @@ pub async fn add_synced_connection(
     let instance_root = paths.root.as_path();
     ensure_instance_path_available(instance_root)?;
 
-    ping_nerevar_server(&new_connection.remote_host, new_connection.remote_sync_port).await?;
-    let summary = fetch_manifest_summary(
+    // A bare host that only answered over HTTPS is stored as `https://{host}`,
+    // so every later sync goes straight there.
+    let resolved = resolve_reachable_address(
         &new_connection.remote_host,
         new_connection.remote_sync_port,
         Some(new_connection.sync_password.as_str()),
     )
     .await?;
+    new_connection.remote_host = resolved.host;
+    let summary = resolved.summary;
 
     // Resolved up front rather than after the download: the runtime install
     // reports its progress through it, and the trust list decides whether the
