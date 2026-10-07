@@ -295,6 +295,34 @@ on each plugin). Base-game data goes in `baseGameData`:
 }
 ```
 
+### 6. Instance settings (optional)
+
+`data/.nerevar/instance-settings.json` holds the per-instance game and OpenMW
+settings that the app's settings page edits. Every manifest rebuild reads it:
+at daemon start (unless `--no-manifest-rebuild`) and on each
+`POST /admin/apply`. `--scan` on its own does not read it; the rebuild that
+follows does. A missing file means the defaults. A rebuild writes the file back
+normalized: missing defaults are filled in and blank or `#` lines are dropped
+from `openmwCfgOverrides`. Invalid JSON fails the rebuild.
+
+The fields:
+
+- `tes3mpGameSettings`: gameplay settings TES3MP enforces, written into the
+  `config.gameSettings` block of the server's `server/scripts/config.lua`, e.g.
+  `[{"name": "best attack", "value": {"boolean": false}}]`.
+- `openmwSettings`: `settings.cfg` values by section and key, e.g.
+  `{"Shaders": {"auto use object normal maps": {"boolean": true}}}`.
+- `openmwCfgOverrides`: extra `openmw.cfg` lines, one string each, e.g.
+  `["fallback=Weather_Clear_Sky_Night_Color,0,0,0"]`.
+- `openmwSettingsCfgOverrides`: raw `settings.cfg` text appended after
+  `openmwSettings`, e.g. `"[Cells]\nviewing distance = 7168"`.
+
+The manifest carries the whole file, so players receive changes on their next
+sync. Their client applies the OpenMW settings only while TES3MP runs and puts
+their own `openmw.cfg` and `settings.cfg` back afterwards. The TES3MP server
+reads `config.lua` only when it starts, so a change to `tes3mpGameSettings`
+takes effect after a server restart.
+
 ## Run it
 
 ```
