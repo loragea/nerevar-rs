@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use super::official_files::is_official_game_file;
 use super::paths::package_abs_path;
 use super::types::{LoadOrder, NerevarManifest, ResolvedOpenMwConfig};
 use crate::openmw_ini_importer::{
@@ -83,7 +84,13 @@ pub fn resolve_load_order(
 /// Appends `name` to `archives` when it is on disk under a `data=` path and
 /// not already listed (ignoring case). A missing `fallback-archive` is fatal
 /// to OpenMW, so an archive that is not there is left out rather than listed.
+///
+/// An official game archive is never listed: the player's own config
+/// registers those, and a package never ships one.
 fn push_archive(archives: &mut Vec<String>, index: &PluginIndex, name: &str) {
+    if is_official_game_file(name) {
+        return;
+    }
     if archives.iter().any(|listed| listed.eq_ignore_ascii_case(name)) {
         return;
     }

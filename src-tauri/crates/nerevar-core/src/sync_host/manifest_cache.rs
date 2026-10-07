@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
 
-use crate::instance_data::{load_manifest, manifest_path};
+use crate::instance_data::{is_official_game_file, load_manifest, manifest_path};
 
 #[derive(Clone)]
 struct HostingPackageIndex {
@@ -41,6 +41,14 @@ impl HostingManifestCache {
 
         let package = cache.packages.get(package_id)?;
         if !package.files.contains(relative_path) {
+            return None;
+        }
+        // A manifest built before official game data was excluded may still
+        // list it; it is never served regardless.
+        if is_official_game_file(relative_path) {
+            log::warn!(
+                "Refusing to serve {relative_path} from package {package_id}: official game data"
+            );
             return None;
         }
 
@@ -154,7 +162,10 @@ mod tests {
                     "treeChecksum": "sha256:tree",
                     "totalSizeBytes": 1,
                     "fileCount": 1,
-                    "files": [{ "path": "a.txt", "size": 1, "checksum": "sha256:a" }],
+                    "files": [
+                        { "path": "a.txt", "size": 1, "checksum": "sha256:a" },
+                        { "path": "Data Files/Morrowind.bsa", "size": 1, "checksum": "sha256:m" }
+                    ],
                     "plugins": []
                 }],
                 "resolved": { "encoding": "win1252", "dataPaths": [], "content": [] },
@@ -169,6 +180,12 @@ mod tests {
 
         let resolved = get_package_file_path(&cache, &data_dir, "pkg-1", "a.txt").unwrap();
         assert!(resolved.is_some());
+        // Listed in this (old-style) manifest, but official game data.
+        assert!(
+            get_package_file_path(&cache, &data_dir, "pkg-1", "Data Files/Morrowind.bsa")
+                .unwrap()
+                .is_none()
+        );
 
         let read_guard = cache.read().unwrap();
         assert!(read_guard.inner.is_some());

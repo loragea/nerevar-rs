@@ -5,6 +5,7 @@ use chrono::Utc;
 use rayon::prelude::*;
 
 use super::checksum::{hash_package_directory, PackageHashResult};
+use super::official_files::{is_official_game_file, official_game_file_message};
 use super::paths::{manifest_path, package_abs_path};
 use super::progress::{BackgroundOperationPhase, ProgressEmitter};
 use super::resolver::resolve_load_order;
@@ -112,7 +113,16 @@ pub fn build_manifest(
                 tree_checksum,
                 files,
                 total_size_bytes,
+                excluded_official,
             } = hash_package_directory(&package_dir, shared_progress.clone())?;
+            for path in &excluded_official {
+                log::warn!(
+                    "Package \"{}\" contains {path}: {}. It is left out of the manifest; \
+                     remove it from the package.",
+                    item.entry.name,
+                    official_game_file_message(path)
+                );
+            }
 
             Ok((
                 item.index,
@@ -126,7 +136,15 @@ pub fn build_manifest(
                     total_size_bytes,
                     file_count: files.len() as u32,
                     files,
-                    plugins: item.entry.plugins.clone(),
+                    // A load order saved before the package was rescanned
+                    // may still name an official file; it never ships.
+                    plugins: item
+                        .entry
+                        .plugins
+                        .iter()
+                        .filter(|plugin| !is_official_game_file(&plugin.file))
+                        .cloned()
+                        .collect(),
                 },
             ))
         })
@@ -273,4 +291,80 @@ fn validate_package_on_disk(
     }
 
     issues
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::instance_data::types::{PackageKind, PluginEntry, LOAD_ORDER_VERSION};
+
+    fn write(path: &Path, contents: &[u8]) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+
+    /// A package that bundles official game data keeps its own files in the
+    /// manifest; the official ones are never listed, served or counted.
+    #[test]
+    fn official_game_files_are_left_out_of_the_manifest() {
+        let root = std::env::temp_dir().join(format!(
+            "nerevar-manifest-official-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let data_dir = root.join("data");
+        let tes3mp = root.join("tes3mp");
+        write(
+            &tes3mp.join("tes3mp-server-default.cfg"),
+            b"[General]\nport = 25565\npassword = \n",
+        );
+        std::fs::create_dir_all(tes3mp.join("server/data")).unwrap();
+        write(&tes3mp.join("server/scripts/config.lua"), b"config = {}\n");
+
+        write(&data_dir.join("Bundled/patch.esp"), b"12345");
+        write(&data_dir.join("Bundled/Data Files/Morrowind.bsa"), b"bethesda bytes");
+        write(&data_dir.join("Bundled/bloodmoon.esm"), b"bethesda bytes");
+
+        let load_order = LoadOrder {
+            version: LOAD_ORDER_VERSION,
+            base_game_data: None,
+            content_order: None,
+            entries: vec![LoadOrderEntry {
+                id: "bundled".into(),
+                name: "Bundled".into(),
+                kind: PackageKind::Mod,
+                relative_dir: "Bundled".into(),
+                enabled: true,
+                priority: 10,
+                // As a load order saved before a rescan might still read.
+                plugins: ["patch.esp", "Morrowind.bsa"]
+                    .iter()
+                    .map(|file| PluginEntry {
+                        file: (*file).into(),
+                        enabled: true,
+                    })
+                    .collect(),
+                tree_checksum: None,
+            }],
+        };
+
+        let manifest =
+            build_manifest("id", "name", &root, &data_dir, &load_order, &mut None).unwrap();
+        let package = &manifest.packages[0];
+        let paths: Vec<&str> = package.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["patch.esp"]);
+        assert_eq!(package.file_count, 1);
+        assert_eq!(package.total_size_bytes, 5);
+        assert_eq!(manifest.total_download_bytes, 5);
+        assert_eq!(package.plugins.len(), 1);
+        assert_eq!(package.plugins[0].file, "patch.esp");
+        assert!(manifest.resolved.archives.is_empty());
+        assert!(!manifest
+            .resolved
+            .content
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("bloodmoon.esm")));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

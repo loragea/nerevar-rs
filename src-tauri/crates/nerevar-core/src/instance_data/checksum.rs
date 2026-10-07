@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 
+use super::official_files::is_official_game_file;
 use super::progress::{BackgroundOperationPhase, ProgressEmitter};
 use super::types::ManifestFileEntry;
 
@@ -14,6 +15,9 @@ pub struct PackageHashResult {
     pub tree_checksum: String,
     pub files: Vec<ManifestFileEntry>,
     pub total_size_bytes: u64,
+    /// Official game files found in the package (relative paths), which are
+    /// left out of everything above: never hashed, listed, served or counted.
+    pub excluded_official: Vec<String>,
 }
 
 struct HashedFile {
@@ -25,12 +29,22 @@ struct HashedFile {
 
 /// Hash every file in a package directory once, producing both the tree fingerprint and
 /// per-file manifest entries.
+///
+/// Official game files (see `official_files`) are skipped and reported in
+/// `excluded_official`, so the host's manifest and a client's check of its
+/// own copy agree on the tree without them.
 pub fn hash_package_directory(
     package_dir: &Path,
     progress: Option<Arc<Mutex<ProgressEmitter>>>,
 ) -> Result<PackageHashResult, String> {
     let mut paths = Vec::new();
     collect_files(package_dir, package_dir, &mut paths)?;
+    let (excluded, mut paths): (Vec<_>, Vec<_>) = paths
+        .into_iter()
+        .partition(|(relative, _)| is_official_game_file(relative));
+    let mut excluded_official: Vec<String> =
+        excluded.into_iter().map(|(relative, _)| relative).collect();
+    excluded_official.sort();
     paths.sort_by(|a, b| a.0.cmp(&b.0));
 
     let total = paths.len() as u64;
@@ -75,6 +89,7 @@ pub fn hash_package_directory(
         tree_checksum: format!("sha256:{}", hex_encode(tree.finalize())),
         files,
         total_size_bytes,
+        excluded_official,
     })
 }
 
@@ -193,6 +208,29 @@ mod tests {
             let path = dir.join(&file.path);
             assert_eq!(file.checksum, file_checksum(&path).unwrap());
         }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn official_game_files_are_left_out_of_the_hash() {
+        let dir = std::env::temp_dir().join(format!("nerevar-hash-official-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("Data Files")).unwrap();
+        fs::write(dir.join("a.esp"), b"alpha").unwrap();
+        let clean = hash_package_directory(&dir, None).unwrap();
+
+        fs::write(dir.join("Data Files/morrowind.BSA"), b"bethesda bytes").unwrap();
+        fs::write(dir.join("Tribunal.esm"), b"bethesda bytes").unwrap();
+        let with_official = hash_package_directory(&dir, None).unwrap();
+
+        assert_eq!(with_official.tree_checksum, clean.tree_checksum);
+        assert_eq!(with_official.total_size_bytes, 5);
+        assert_eq!(with_official.files.len(), 1);
+        assert_eq!(
+            with_official.excluded_official,
+            vec!["Data Files/morrowind.BSA".to_string(), "Tribunal.esm".to_string()]
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }
