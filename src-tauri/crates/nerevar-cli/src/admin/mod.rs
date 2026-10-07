@@ -22,6 +22,7 @@ use std::io::Write;
 
 use nerevar_core::admin::{AdminStatus, StagedPackage};
 use nerevar_core::instance_data::LoadOrder;
+use nerevar_core::sync_client::resolve_reachable_host;
 
 use crate::cli::{AdminAction, AdminOptions, LoadOrderAction};
 use client::AdminClient;
@@ -31,7 +32,12 @@ const LOAD_ORDER_ROUTE: &str = "/admin/load-order";
 
 /// Builds the client for `options`, failing before any request when the host
 /// address is unusable or no token was given.
-pub fn connect(options: &AdminOptions) -> Result<AdminClient, String> {
+///
+/// The address is then resolved by `nerevar_core`'s
+/// `resolve_reachable_host` — the rule the desktop app's connection form
+/// uses — so a bare hostname that only answers over HTTPS (a host behind a
+/// reverse proxy) is reached at `https://{host}`, with a note on stderr.
+pub async fn connect(options: &AdminOptions) -> Result<AdminClient, String> {
     let host = options
         .host
         .as_deref()
@@ -41,7 +47,14 @@ pub fn connect(options: &AdminOptions) -> Result<AdminClient, String> {
         options.token_file.as_deref(),
         token::token_from_environment().as_deref(),
     )?;
-    AdminClient::new(host, options.port, token)
+    let resolved = resolve_reachable_host(host, options.port).await?;
+    if resolved != host {
+        eprintln!(
+            "nerevar-cli admin: nothing answered on port {}; using {resolved}. Pass --host {resolved} to skip the retry.",
+            options.port
+        );
+    }
+    AdminClient::new(&resolved, options.port, token)
 }
 
 /// Runs one `admin` subcommand against `client`, writing what a person reads

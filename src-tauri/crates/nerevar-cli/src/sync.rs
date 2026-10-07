@@ -69,7 +69,8 @@ use nerevar_core::process_manager::{launch_tes3mp_client, ProcessManager, Proces
 use nerevar_core::reporter::EventSink;
 use nerevar_core::runtime::{self, RuntimeMismatch, TargetPlatform, TrustedRuntimeRepos};
 use nerevar_core::sync_client::{
-    sync_if_needed, touch_last_synced, write_synced_client_connection, SyncCoordinator,
+    resolve_reachable_host, sync_if_needed, touch_last_synced, write_synced_client_connection,
+    SyncCoordinator,
 };
 
 use crate::cli::SyncArgs;
@@ -284,6 +285,17 @@ pub async fn run(args: SyncArgs) -> Result<i32, String> {
 
     if args.install_runtime {
         install_runtime(&instance, &trusted, sink.clone()).await?;
+    }
+
+    // The rule the app's join flow applies to a typed address: a bare host
+    // that only answers over HTTPS is stored as `https://{host}` from now on.
+    if let (Some(host), Some(port)) = (instance.remote_host.clone(), instance.remote_sync_port) {
+        let resolved = resolve_reachable_host(&host, port).await?;
+        if resolved != host {
+            log::info!("{host} did not answer on port {port}; saving {resolved} as its address");
+            instance.remote_host = Some(resolved);
+            persist_synced_instance(&args.config, &mut config, instance.clone())?;
+        }
     }
 
     let outcome =

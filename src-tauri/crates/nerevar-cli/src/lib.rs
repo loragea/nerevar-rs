@@ -56,7 +56,7 @@ pub async fn run(cli: Cli) -> i32 {
 }
 
 async fn run_admin(command: &cli::AdminCommand) -> Result<(), String> {
-    let client = admin::connect(&command.options)?;
+    let client = admin::connect(&command.options).await?;
     let mut out = std::io::stdout().lock();
     let result = admin::run(&client, &command.options, &command.action, &mut out).await;
     // Explicit because `main` leaves through `std::process::exit`, which runs
