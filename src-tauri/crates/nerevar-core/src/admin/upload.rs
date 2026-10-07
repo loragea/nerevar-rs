@@ -17,7 +17,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::instance_data::{scan_package_dir, ProgressEmitter};
+use crate::instance_data::{
+    find_official_game_files, official_game_file_message, scan_package_dir, ProgressEmitter,
+};
 use crate::reporter::NullEventSink;
 use crate::runtime::acquire::{detect_archive_format, extract_tar_gz, extract_zip, ArchiveFormat};
 
@@ -27,6 +29,9 @@ use super::staging::{
 
 /// Extracts `staging/<name>.part` into `staging/<name>/` and describes what
 /// landed.
+///
+/// An archive containing any official game file (`Morrowind.esm`,
+/// `Morrowind.bsa`, … at any depth) is refused.
 ///
 /// The archive is deleted whether this succeeds or fails, and a failure
 /// leaves no `staging/<name>/` behind: a rejected upload must not look like a
@@ -45,7 +50,8 @@ pub fn stage_uploaded_archive(
     let destination = staged_package_dir(data_dir, name);
     let scratch = extraction_scratch(data_dir, name);
 
-    let outcome = extract_into_place(&archive, &scratch, &destination);
+    let outcome = extract_into_place(&archive, &scratch, &destination)
+        .and_then(|()| refuse_official_game_files(&destination));
     let _ = std::fs::remove_file(&archive);
     let _ = std::fs::remove_dir_all(&scratch);
     if let Err(error) = outcome {
@@ -64,6 +70,21 @@ pub fn stage_uploaded_archive(
         staged_at: now_rfc3339(),
         staged_by: staged_by.to_string(),
     })
+}
+
+/// Refuses a package that contains any of the official game files: the
+/// host never distributes Bethesda's data, so such an upload is the caller's
+/// mistake (a 400), and nothing of it is kept.
+pub(crate) fn refuse_official_game_files(package_dir: &Path) -> Result<(), String> {
+    let found = find_official_game_files(package_dir);
+    let Some(first) = found.first() else {
+        return Ok(());
+    };
+    let mut message = official_game_file_message(first);
+    if found.len() > 1 {
+        message.push_str(&format!(" (the package also contains: {})", found[1..].join(", ")));
+    }
+    Err(message)
 }
 
 /// Where an upload is unpacked before the top-level rule decides what the
@@ -352,5 +373,37 @@ mod tests {
         let error = stage(&scratch.0, "Nothing").unwrap_err();
         assert!(error.contains(".zip"), "{error}");
         assert!(!staged_package_dir(&scratch.0, "Nothing").exists());
+    }
+
+    #[test]
+    fn an_archive_containing_official_game_data_is_refused() {
+        let scratch = scratch("official");
+        write_zip(
+            &staged_archive_path(&scratch.0, "Bundled"),
+            &[
+                ("Bundled/patch.esp", b"TES3"),
+                ("Bundled/Data Files/Morrowind.bsa", b"bethesda bytes"),
+            ],
+        );
+
+        let error = stage(&scratch.0, "Bundled").unwrap_err();
+        assert_eq!(
+            error,
+            "Morrowind.bsa is official game data and cannot be distributed; players bring their own copy"
+        );
+        assert!(!staged_package_dir(&scratch.0, "Bundled").exists());
+        assert!(!staged_archive_path(&scratch.0, "Bundled").exists());
+    }
+
+    #[test]
+    fn every_official_file_in_a_refused_archive_is_named() {
+        let scratch = scratch("official-many");
+        write_tar_gz(
+            &staged_archive_path(&scratch.0, "Bundled"),
+            &[("bloodmoon.ESM", b"x"), ("sub/Tribunal.bsa", b"x"), ("ok.esp", b"x")],
+        );
+        let error = stage(&scratch.0, "Bundled").unwrap_err();
+        assert!(error.starts_with("bloodmoon.ESM is official game data"), "{error}");
+        assert!(error.contains("sub/Tribunal.bsa"), "{error}");
     }
 }
