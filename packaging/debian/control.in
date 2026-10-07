@@ -4,7 +4,7 @@ Section: games
 Priority: optional
 Architecture: @ARCH@
 Installed-Size: @INSTALLED_SIZE@
-Maintainer: Nerevar contributors <noreply@github.com>
+Maintainer: Victor Persson <persson.victor.42@gmail.com>
 Homepage: https://github.com/loragea/nerevar-rs
 Depends: libc6, libgcc-s1, adduser
 Recommends: systemd

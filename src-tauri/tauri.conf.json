@@ -32,7 +32,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "publisher": "Nerevar contributors",
+    "publisher": "Victor Persson",
     "homepage": "https://github.com/loragea/nerevar-rs",
     "license": "GPL-3.0-only",
     "licenseFile": "../LICENSE",

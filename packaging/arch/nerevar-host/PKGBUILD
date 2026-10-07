@@ -1,4 +1,4 @@
-# Maintainer: Nerevar contributors <noreply@github.com>
+# Maintainer: Victor Persson <persson.victor.42@gmail.com>
 #
 # The headless TES3MP host daemon and the command-line Nerevar client, built
 # from the release tarball of a tag on https://github.com/loragea/nerevar-rs.

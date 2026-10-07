@@ -9,7 +9,7 @@ edition = "2021"
 name = "nerevar"
 version.workspace = true
 description = "Morrowind Multiplayer without the mod-list headaches."
-authors = ["Nerevar contributors <noreply@github.com>"]
+authors = ["Victor Persson <persson.victor.42@gmail.com>"]
 edition.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
